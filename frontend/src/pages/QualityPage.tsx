@@ -41,7 +41,7 @@ export function QualityPage() {
             <select
               value={datasetId}
               onChange={(e) => setDatasetId(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             >
               <option value="">Выберите датасет</option>
               {(datasetsQuery.data?.items ?? []).map((d) => (
@@ -97,25 +97,25 @@ export function QualityPage() {
         <div className="mb-2 text-sm font-semibold">Кросс-проверка</div>
         <div className="grid gap-3 md:grid-cols-2">
           <input
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             placeholder="task_id"
             value={form.task_id}
             onChange={(e) => setForm((s) => ({ ...s, task_id: e.target.value }))}
           />
           <input
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             placeholder="annotation_a_id"
             value={form.annotation_a_id}
             onChange={(e) => setForm((s) => ({ ...s, annotation_a_id: e.target.value }))}
           />
           <input
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             placeholder="annotation_b_id"
             value={form.annotation_b_id}
             onChange={(e) => setForm((s) => ({ ...s, annotation_b_id: e.target.value }))}
           />
           <input
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
             placeholder="arbitrator (user id, опционально)"
             value={form.arbitrator ?? ""}
             onChange={(e) => setForm((s) => ({ ...s, arbitrator: e.target.value ? e.target.value : null }))}
@@ -131,7 +131,7 @@ export function QualityPage() {
 
         {form.arbitration_requested ? (
           <textarea
-            className="mt-3 w-full min-h-[90px] rounded-md border border-gray-300 p-3 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-950"
+            className="mt-3 w-full min-h-[90px] rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-3 text-sm outline-none focus:border-blue-500"
             placeholder="Комментарий арбитра"
             value={form.arbitration_comment ?? ""}
             onChange={(e) => setForm((s) => ({ ...s, arbitration_comment: e.target.value || null }))}

@@ -1,8 +1,7 @@
 import React from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "./store";
-import { Header } from "./components/Header";
-import { Sidebar } from "./components/Sidebar";
+import { Layout } from "./components/Layout";
 
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -20,31 +19,21 @@ function RequireAuth({ children }: { children: React.ReactElement }) {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 }
 
-function AppLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-full bg-gray-50 dark:bg-gray-950">
-      <Header />
-      <div className="flex">
-        <Sidebar />
-        <main className="flex-1 p-4">{children}</main>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <Routes>
+      {/* Публичные страницы — без Layout */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
+      {/* Защищённые страницы — с Layout */}
       <Route
         path="/"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <DashboardPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -52,9 +41,9 @@ export default function App() {
         path="/datasets"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <DatasetsPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -62,9 +51,9 @@ export default function App() {
         path="/datasets/:id"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <DatasetDetailPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -72,9 +61,9 @@ export default function App() {
         path="/tasks"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <TasksPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -82,9 +71,9 @@ export default function App() {
         path="/labeling"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <LabelingPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -92,9 +81,9 @@ export default function App() {
         path="/quality"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <QualityPage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -102,9 +91,9 @@ export default function App() {
         path="/finance"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <FinancePage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />
@@ -112,9 +101,9 @@ export default function App() {
         path="/profile"
         element={
           <RequireAuth>
-            <AppLayout>
+            <Layout>
               <ProfilePage />
-            </AppLayout>
+            </Layout>
           </RequireAuth>
         }
       />

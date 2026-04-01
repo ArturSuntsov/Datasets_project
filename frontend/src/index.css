@@ -2,9 +2,233 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
-  height: 100%;
+/* =============================================================================
+   БАЗОВЫЕ СТИЛИ
+   ============================================================================= */
+
+@layer base {
+  /* Плавные переходы для всех элементов */
+  html {
+    @apply transition-colors duration-300;
+  }
+  
+  /* Фон и текст по умолчанию */
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-dark-bg dark:text-gray-100;
+    @apply antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  
+  /* Скроллбар */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 dark:bg-gray-800;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 dark:bg-gray-600 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500 dark:bg-gray-500;
+  }
 }
 
+/* =============================================================================
+   КОМПОНЕНТЫ
+   ============================================================================= */
+
+@layer components {
+  /* 🔘 Кнопки */
+  .btn-primary {
+    @apply px-6 py-3 rounded-lg bg-gradient-primary 
+           hover:from-blue-700 hover:to-indigo-700 
+           text-white font-semibold 
+           shadow-lg hover:shadow-glow-lg 
+           transform hover:-translate-y-0.5 
+           transition-all duration-200 
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+  }
+  
+  .btn-secondary {
+    @apply px-6 py-3 rounded-lg border-2 border-gray-300 dark:border-gray-600
+           hover:border-primary-500 dark:hover:border-primary-400
+           text-gray-700 dark:text-gray-300
+           font-semibold transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-sm {
+    @apply px-4 py-2 text-sm rounded-lg bg-gradient-primary
+           text-white font-medium shadow-md hover:shadow-glow
+           transform hover:-translate-y-0.5 transition-all duration-200;
+  }
+  
+  /* 📝 Поля ввода */
+  .input-field {
+    @apply w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600
+           bg-white dark:bg-gray-700 
+           text-gray-900 dark:text-white
+           focus:ring-2 focus:ring-primary-500 focus:border-transparent
+           transition-all duration-200 outline-none
+           placeholder-gray-500 dark:placeholder-gray-400;
+  }
+  
+  .input-error {
+    @apply border-red-500 focus:ring-red-500;
+  }
+  
+  /* 📦 Карточки */
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-2xl shadow-soft 
+           border border-gray-200 dark:border-gray-700 p-6
+           transition-all duration-300;
+  }
+  
+  .card-hover {
+    @apply hover:shadow-xl hover:-translate-y-1 hover:border-primary-300 dark:hover:border-primary-700;
+  }
+  
+  /* 📊 Таблицы */
+  .table-container {
+    @apply overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700;
+  }
+  
+  .table {
+    @apply w-full text-sm;
+  }
+  
+  .table thead {
+    @apply bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600;
+  }
+  
+  .table th {
+    @apply px-6 py-4 text-left font-semibold text-gray-700 dark:text-gray-300;
+  }
+  
+  .table tbody tr {
+    @apply border-b border-gray-100 dark:border-gray-700
+           hover:bg-gray-50 dark:hover:bg-gray-700/50
+           transition-colors duration-150;
+  }
+  
+  .table td {
+    @apply px-6 py-4 text-gray-900 dark:text-gray-100;
+  }
+  
+  /* 🎯 Бейджи */
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium;
+  }
+  
+  .badge-primary {
+    @apply bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300;
+  }
+  
+  .badge-success {
+    @apply bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300;
+  }
+  
+  .badge-warning {
+    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300;
+  }
+  
+  .badge-danger {
+    @apply bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300;
+  }
+}
+
+/* =============================================================================
+   УТИЛИТЫ
+   ============================================================================= */
+
+@layer utilities {
+  /* Анимации появления */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+  
+  .animate-fade-in-up {
+    animation: fadeInUp 0.4s ease-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+  
+  /* Градиентный текст */
+  .text-gradient {
+    @apply bg-gradient-primary bg-clip-text text-transparent;
+  }
+  
+  /* Стеклянный эффект */
+  .glass {
+    @apply bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg;
+  }
+  
+  /* Скрытие скроллбара */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* =============================================================================
+   KEYFRAMES
+   ============================================================================= */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes slideUp {
+  from { 
+    transform: translateY(20px); 
+    opacity: 0; 
+  }
+  to { 
+    transform: translateY(0); 
+    opacity: 1; 
+  }
+}
+
+@keyframes slideDown {
+  from { 
+    transform: translateY(-10px); 
+    opacity: 0; 
+  }
+  to { 
+    transform: translateY(0); 
+    opacity: 1; 
+  }
+}
+
+@keyframes scaleIn {
+  from { 
+    transform: scale(0.95); 
+    opacity: 0; 
+  }
+  to { 
+    transform: scale(1); 
+    opacity: 1; 
+  }
+}

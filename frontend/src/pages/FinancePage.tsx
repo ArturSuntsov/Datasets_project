@@ -38,13 +38,13 @@ export function FinancePage() {
           <div className="mb-2 text-sm font-semibold">Пополнение (stub)</div>
           <div className="grid gap-3">
             <input
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
               value={String(payForm.amount)}
               onChange={(e) => setPayForm((s) => ({ ...s, amount: e.target.value }))}
               placeholder="amount"
             />
             <input
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
               value={payForm.currency ?? "USD"}
               onChange={(e) => setPayForm((s) => ({ ...s, currency: e.target.value }))}
               placeholder="currency"
@@ -65,13 +65,13 @@ export function FinancePage() {
           <div className="mb-2 text-sm font-semibold">Выплата (stub)</div>
           <div className="grid gap-3">
             <input
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
               value={String(withdrawForm.amount)}
               onChange={(e) => setWithdrawForm((s) => ({ ...s, amount: e.target.value }))}
               placeholder="amount"
             />
             <input
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
               value={withdrawForm.currency ?? "USD"}
               onChange={(e) => setWithdrawForm((s) => ({ ...s, currency: e.target.value }))}
               placeholder="currency"
@@ -98,7 +98,7 @@ export function FinancePage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
           >
             <option value="">Все статусы</option>
             <option value="pending">pending</option>

@@ -87,7 +87,7 @@ export function LabelingPage() {
           <select
             value={selectedTaskId ?? ""}
             onChange={(e) => setSelectedTaskId(e.target.value || null)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
           >
             {tasks.length === 0 ? <option value="">Нет задач</option> : null}
             {tasks.map((t) => (
@@ -122,7 +122,7 @@ export function LabelingPage() {
             <textarea
               value={labelDataJson}
               onChange={(e) => setLabelDataJson(e.target.value)}
-              className="mt-3 min-h-[240px] w-full rounded-md border border-gray-300 bg-white p-3 font-mono text-xs outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-950"
+              className="mt-3 min-h-[240px] w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 font-mono text-xs outline-none focus:border-blue-500"
             />
             {labelError ? <div className="mt-2 text-xs text-red-700">{labelError}</div> : null}
 
@@ -155,7 +155,7 @@ export function LabelingPage() {
             <textarea
               value={autoContextJson}
               onChange={(e) => setAutoContextJson(e.target.value)}
-              className="mt-3 min-h-[140px] w-full rounded-md border border-gray-300 bg-white p-3 font-mono text-xs outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-950"
+              className="mt-3 min-h-[140px] w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 font-mono text-xs outline-none focus:border-blue-500"
             />
 
             <button

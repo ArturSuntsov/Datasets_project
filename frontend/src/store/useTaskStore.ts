@@ -22,7 +22,7 @@ export const useTaskStore = create<TaskState>((set) => ({
 
   createTask: async (body) => {
     set({ loading: true, error: null });
-    const task = await tasksAPI.create(body as Record<string, unknown>);
+    const task = await tasksAPI.create(body as unknown as Record<string, unknown>);
     set({ loading: false });
     return task;
   },

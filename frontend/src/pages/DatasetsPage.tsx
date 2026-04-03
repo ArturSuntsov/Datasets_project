@@ -31,11 +31,10 @@ export function DatasetsPage() {
   const datasetsQuery = useQuery<ApiListResponse<Dataset>>({
     queryKey: ["datasets", limit, offset],
     queryFn: () => datasetsAPI.list({ limit, offset }),
-    keepPreviousData: true,
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: DatasetCreateRequest) => datasetsAPI.create(body),
+    mutationFn: (body: DatasetCreateRequest) => datasetsAPI.create(body as unknown as Record<string, unknown>),
     onSuccess: () => {
       setForm({ name: "", description: "", status: "draft", metadata: {} });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
@@ -185,7 +184,7 @@ export function DatasetsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((d) => (
+                  {items.map((d: Dataset) => (
                     <tr key={d.id}>
                       <td className="py-3 px-4">
                         <Link 

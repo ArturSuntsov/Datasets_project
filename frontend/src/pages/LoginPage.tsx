@@ -9,10 +9,8 @@
  * - Поддержка тёмной темы
  */
 
-import React from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
-import { useTheme } from "../hooks/useTheme";
 import { useAuthStore } from "../store";
 import { LoginRequest } from "../types";
 
@@ -23,7 +21,6 @@ type LoginFormValues = {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { theme } = useTheme();
   const login = useAuthStore((s) => s.login);
   const loading = useAuthStore((s) => s.loading);
   const error = useAuthStore((s) => s.error);

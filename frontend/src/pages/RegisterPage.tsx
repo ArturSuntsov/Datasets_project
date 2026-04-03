@@ -9,10 +9,8 @@
  * - Адаптивность для мобильных
  */
 
-import React from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
-import { useTheme } from "../hooks/useTheme";
 import { useAuthStore } from "../store";
 import { RegisterRequest, Role } from "../types";
 
@@ -25,7 +23,6 @@ type RegisterFormValues = {
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const { theme } = useTheme();
   const registerUser = useAuthStore((s) => s.register);
   const loading = useAuthStore((s) => s.loading);
   const error = useAuthStore((s) => s.error);
@@ -34,13 +31,10 @@ export function RegisterPage() {
     register: rhfRegister,
     handleSubmit,
     formState: { errors },
-    watch,
   } = useForm<RegisterFormValues>({ 
     mode: "onBlur", 
     defaultValues: { role: "customer" } 
   });
-
-  const password = watch('password');
 
   const onSubmit = async (values: RegisterFormValues) => {
     try {

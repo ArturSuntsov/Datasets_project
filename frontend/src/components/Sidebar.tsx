@@ -9,10 +9,8 @@
  * - Поддержка тёмной темы
  */
 
-import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuthStore } from "../store";
-import { useTheme } from "../hooks/useTheme";
 
 type NavItem = {
   to: string;
@@ -32,7 +30,6 @@ const items: NavItem[] = [
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
-  const { theme } = useTheme();
 
   return (
     <aside className="fixed left-0 top-0 h-full w-72 min-w-[280px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-colors duration-300 z-40">

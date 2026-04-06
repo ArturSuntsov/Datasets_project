@@ -1,0 +1,30 @@
+# Основные зависимости для запуска проекта
+# Установка: pip install -r requirements.txt
+
+# Django основа
+Django==4.2.7
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.3.0
+django-cors-headers==4.3.0
+
+# MongoDB
+mongoengine==0.27.0
+pymongo==4.6.0
+dnspython==2.4.2
+
+# Безопасность
+bcrypt==4.0.1
+PyJWT==2.8.0
+
+# Задачи
+celery==5.3.4
+redis==5.0.1
+
+# Утилиты
+python-dotenv==1.0.0
+pillow==10.1.0
+
+# Data Lake (MinIO)
+minio>=7.2.0
+python-magic>=0.4.27
+urllib3>=2.0.0

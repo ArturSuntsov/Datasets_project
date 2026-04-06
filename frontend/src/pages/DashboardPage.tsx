@@ -9,7 +9,6 @@
  * - Адаптивный дизайн
  */
 
-import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { datasetsAPI, tasksAPI } from "../services/api";

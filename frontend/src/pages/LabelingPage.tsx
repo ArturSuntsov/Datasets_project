@@ -1,7 +1,7 @@
 import React from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { datasetsAPI, tasksAPI } from "../services/api";
-import { Annotation, AnnotateRequest, Dataset, Task, TaskStatus } from "../types";
+import { Annotation, AnnotateRequest, Dataset, Task } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 
 function safeJsonParse(input: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {

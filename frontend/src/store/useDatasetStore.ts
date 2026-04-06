@@ -24,7 +24,7 @@ export const useDatasetStore = create<DatasetState>((set) => ({
 
   createDataset: async (body) => {
     set({ loading: true, error: null });
-    const dataset = await datasetsAPI.create(body);
+    const dataset = await datasetsAPI.create(body as unknown as Record<string, unknown>);
     set({ loading: false });
     return dataset;
   },

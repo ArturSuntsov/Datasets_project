@@ -9,16 +9,13 @@
  * - БЕЗ навигации (только в Sidebar)
  */
 
-import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store";
 import { ThemeToggle } from "./ThemeToggle";
-import { useTheme } from "../hooks/useTheme";
 
 export function Header() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { theme } = useTheme();
   const navigate = useNavigate();
 
   const handleLogout = () => {

@@ -247,7 +247,22 @@ export const financeAPI = {
   },
   
   async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", body);
+  // Отправляем то, что заполнил пользователь
+    const payload: Record<string, unknown> = {
+      amount: body.amount,
+      currency: body.currency || "USD",
+      description: body.description || "",
+    };
+    
+    if (body.to_username) {
+      payload.to_username = body.to_username;
+    } else if (body.to_email) {
+      payload.to_email = body.to_email;
+    } else if (body.to_user_id) {
+      payload.to_user_id = body.to_user_id;
+    }
+    
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", payload);
     return res.data;
   },
 };

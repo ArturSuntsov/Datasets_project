@@ -3,54 +3,44 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { financeAPI } from "../services/api";
 import { PaymentRequestBody, Transaction, ApiListResponse, TransferRequest } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store";
 
 export function FinancePage() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  
   const [limit] = React.useState(20);
   const [offset, setOffset] = React.useState(0);
   const [status, setStatus] = React.useState<string>("");
   const [activeTab, setActiveTab] = React.useState<"history" | "pay" | "withdraw" | "transfer">("history");
 
   const txQuery = useQuery<ApiListResponse<Transaction>>({
-    queryKey: ["finance-transactions", limit, offset, status],
+    queryKey: ["finance-transactions", user?.id, limit, offset, status],
     queryFn: () => financeAPI.transactions({ limit, offset, status: status || undefined }),
+    enabled: !!user?.id,
   });
 
   const payMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.pay(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
   });
 
   const withdrawMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.withdraw(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
   });
 
   const transferMutation = useMutation({
     mutationFn: (body: TransferRequest) => financeAPI.transfer(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
   });
 
   const [payForm, setPayForm] = React.useState<PaymentRequestBody>({ amount: "10", currency: "USD", description: "" });
   const [withdrawForm, setWithdrawForm] = React.useState<PaymentRequestBody>({ amount: "5", currency: "USD", description: "" });
-  const [transferForm, setTransferForm] = React.useState<TransferRequest>({ to_user_id: "", amount: "10", currency: "USD", description: "" });
+  const [transferForm, setTransferForm] = React.useState<TransferRequest>({ amount: "10", currency: "USD", description: "" });
 
   const total = txQuery.data?.total ?? 0;
   const items = txQuery.data?.items ?? [];
-
-  const formatUserName = (tx: Transaction, currentUserId?: string) => {
-    if (tx.type === "payment") {
-      return tx.from_user_name || "Система";
-    } else if (tx.type === "payout") {
-      return tx.to_user_name || "Система";
-    } else if (tx.type === "transfer") {
-      // Для переводов показываем кому от кого
-      if (tx.from_user_name && tx.to_user_name) {
-        return `${tx.from_user_name} → ${tx.to_user_name}`;
-      }
-    }
-    return tx.description || "—";
-  };
 
   const getTransactionIcon = (type: string) => {
     switch (type) {
@@ -105,7 +95,7 @@ export function FinancePage() {
         ))}
       </div>
 
-      {/* Формы */}
+      {/* Форма пополнения */}
       {activeTab === "pay" && (
         <div className="card max-w-md">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">💳 Пополнение баланса</h2>
@@ -156,6 +146,7 @@ export function FinancePage() {
         </div>
       )}
 
+      {/* Форма вывода */}
       {activeTab === "withdraw" && (
         <div className="card max-w-md">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">💸 Вывод средств</h2>
@@ -206,20 +197,44 @@ export function FinancePage() {
         </div>
       )}
 
+      {/* Форма перевода */}
       {activeTab === "transfer" && (
         <div className="card max-w-md">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">🔄 Перевод пользователю</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ID получателя</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Получатель (username или email)
+              </label>
               <input
                 type="text"
-                value={transferForm.to_user_id}
-                onChange={(e) => setTransferForm((s) => ({ ...s, to_user_id: e.target.value }))}
-                className="input-field font-mono text-sm"
-                placeholder="69dc908f61bb75b0c71f4cad"
+                value={transferForm.to_username || transferForm.to_email || ""}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.includes("@")) {
+                    setTransferForm((s) => ({ 
+                      ...s, 
+                      to_email: value, 
+                      to_username: undefined, 
+                      to_user_id: undefined 
+                    }));
+                  } else {
+                    setTransferForm((s) => ({ 
+                      ...s, 
+                      to_username: value, 
+                      to_email: undefined, 
+                      to_user_id: undefined 
+                    }));
+                  }
+                }}
+                className="input-field"
+                placeholder="customer@test.com  или  annotator"
               />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Можно ввести email или username получателя
+              </p>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Сумма</label>
               <input
@@ -232,8 +247,9 @@ export function FinancePage() {
                 placeholder="25.00"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
               <input
                 type="text"
                 value={transferForm.description || ""}
@@ -242,6 +258,7 @@ export function FinancePage() {
                 placeholder="Оплата за разметку"
               />
             </div>
+
             <button
               type="button"
               disabled={transferMutation.isPending}
@@ -331,7 +348,7 @@ export function FinancePage() {
                           : "text-blue-600"
                         }>
                           {tx.type === "payout" ? "-" : tx.type === "payment" || tx.type === "earnings" ? "+" : ""}
-                          {Number(tx.amount).toFixed(2)} {tx.currency}  {/* ← ИСПРАВЛЕНО */}
+                          {Number(tx.amount).toFixed(2)} {tx.currency}
                         </span>
                       </td>
                       <td className="py-3 px-2">

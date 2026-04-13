@@ -142,7 +142,7 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
 
     def _base_qs(self, user):
         # Доступ по владельцу dataset (project owner).
-        return Task.objects().where("dataset.owner", user).order_by("-created_at")
+        return Task.objects(dataset__owner=user).order_by("-created_at")
 
     def _paginate(self, qs, request):
         try:

@@ -1,5 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, isAxiosError } from "axios";
-import { ApiErrorResponse, ApiListResponse, AuthResponse, Dataset, LoginRequest, RegisterRequest, Task, AnnotateRequest, Annotation, QualityMetricsItem, PaymentRequestBody, Transaction, QualityReviewRequest, User } from "../types";
+import { ApiErrorResponse, ApiListResponse, AuthResponse, Dataset, LoginRequest, RegisterRequest, Task, AnnotateRequest, Annotation, QualityMetricsItem, PaymentRequestBody, Transaction, QualityReviewRequest, TransferRequest, User } from "../types";
 
 const ACCESS_TOKEN_KEY = "dataset_ai_access_token";
 const REFRESH_TOKEN_KEY = "dataset_ai_refresh_token";
@@ -235,12 +235,19 @@ export const financeAPI = {
     const res = await api.get<ApiListResponse<Transaction>>("/api/finance/transactions/", { params });
     return res.data;
   },
+  
   async pay(body: PaymentRequestBody): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/pay/", body);
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/pay/", body);
     return res.data;
   },
+  
   async withdraw(body: PaymentRequestBody): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/withdraw/", body);
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/withdraw/", body);
+    return res.data;
+  },
+  
+  async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", body);
     return res.data;
   },
 };

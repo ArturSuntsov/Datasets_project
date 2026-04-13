@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 from decimal import Decimal
 from typing import Any, Dict, Optional
-
 from bson import ObjectId
 from django.http import HttpRequest
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
-
 from ..projects.models import Task
 from ..users.models import User
 from ..users.views import authenticate_from_jwt
@@ -34,10 +31,7 @@ class JWTRequiredMixin:
 
 
 class TransactionViewSet(JWTRequiredMixin, ViewSet):
-    """
-    История транзакций:
-      GET /api/finance/transactions/
-    """
+    """ История транзакций: GET /api/finance/transactions/ """
 
     def list(self, request, *args, **kwargs) -> Response:
         user, resp = self._require_user(request)
@@ -49,18 +43,27 @@ class TransactionViewSet(JWTRequiredMixin, ViewSet):
         except ValueError:
             limit = 20
         limit = max(1, min(limit, 100))
+
         try:
             offset = int(request.query_params.get("offset", 0))
         except ValueError:
             offset = 0
 
         status_filter = request.query_params.get("status")
-        qs = Transaction.objects(user=user).order_by("-created_at")
+        type_filter = request.query_params.get("type")
+        
+        # Показываем транзакции, где пользователь отправитель ИЛИ получатель
+        from mongoengine import Q
+        qs = Transaction.objects(Q(user=user) | Q(from_user=user) | Q(to_user=user)).order_by("-created_at")
+        
         if status_filter:
             qs = qs.filter(status=status_filter)
+        if type_filter:
+            qs = qs.filter(type=type_filter)
 
         total = qs.count()
         items = list(qs.skip(offset).limit(limit))
+
         return Response(
             {
                 "items": [TransactionSerializer(item).to_representation(item) for item in items],
@@ -73,11 +76,7 @@ class TransactionViewSet(JWTRequiredMixin, ViewSet):
 
 
 class PaymentViewSet(JWTRequiredMixin, ViewSet):
-    """
-    Заглушка платёжного шлюза.
-      POST /api/finance/pay/
-      POST /api/finance/withdraw/
-    """
+    """ Заглушка платёжного шлюза. """
 
     @action(detail=False, methods=["post"], url_path="pay")
     def pay(self, request, *args, **kwargs) -> Response:
@@ -87,6 +86,62 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
     def withdraw(self, request, *args, **kwargs) -> Response:
         return self._handle_payment(request, payment_type=PaymentRequest.PAYMENT_WITHDRAW)
 
+    @action(detail=False, methods=["post"], url_path="transfer")
+    def transfer(self, request, *args, **kwargs) -> Response:
+        """ Перевод денег между пользователями """
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+
+        data = dict(request.data)
+        to_user_id = data.get("to_user_id")
+        amount_str = data.get("amount")
+        description = data.get("description", "")
+
+        if not to_user_id or not ObjectId.is_valid(to_user_id):
+            return Response({"detail": "Invalid to_user_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(amount_str)
+            if amount <= 0:
+                return Response({"detail": "Amount must be > 0"}, status=status.HTTP_400_BAD_REQUEST)
+        except:
+            return Response({"detail": "Invalid amount"}, status=status.HTTP_400_BAD_REQUEST)
+
+        to_user = User.objects(id=ObjectId(to_user_id)).first()
+        if not to_user:
+            return Response({"detail": "Recipient not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.balance < amount:
+            return Response({"detail": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Создаем транзакцию перевода
+        tx = Transaction(
+            user=user,
+            from_user=user,
+            to_user=to_user,
+            type=Transaction.TYPE_TRANSFER,
+            status=Transaction.STATUS_COMPLETED,
+            amount=amount,
+            currency=data.get("currency", "USD"),
+            description=description or f"Перевод пользователю {to_user.username}",
+        )
+        tx.save()
+
+        # Обновляем балансы
+        user_coll = User._get_collection()
+        user_coll.update_one({"_id": user.id}, {"$inc": {"balance": -float(amount)}})
+        user_coll.update_one({"_id": to_user.id}, {"$inc": {"balance": float(amount)}})
+
+        return Response(
+            {
+                "transaction": TransactionSerializer().to_representation(tx),
+                "transaction_id": str(tx.id),
+                "status": tx.status,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
     def _handle_payment(self, request, *, payment_type: str) -> Response:
         user, resp = self._require_user(request)
         if resp:
@@ -94,68 +149,71 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
 
         data = dict(request.data)
         data["payment_type"] = payment_type
-
         serializer = PaymentSerializer(data=data)
         serializer.is_valid(raise_exception=True)
+
         amount: Decimal = serializer.validated_data["amount"]
         currency: str = serializer.validated_data["currency"]
         task_id = serializer.validated_data.get("task_id")
+        description = serializer.validated_data.get("description", "")
         metadata = serializer.validated_data.get("metadata") or {}
 
         task: Optional[Task] = None
         if task_id:
             if ObjectId.is_valid(task_id):
                 task = Task.objects(id=ObjectId(task_id)).first()
-            if not task:
-                return Response({"detail": "task_id not found"}, status=status.HTTP_400_BAD_REQUEST)
+                if not task:
+                    return Response({"detail": "task_id not found"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Создаем транзакцию в pending.
-        tx_type = Transaction.TYPE_PAYMENT if payment_type == PaymentRequest.PAYMENT_PAY else Transaction.TYPE_PAYOUT
+        if payment_type == PaymentRequest.PAYMENT_PAY:
+            tx_type = Transaction.TYPE_PAYMENT
+            from_user = None
+            to_user = user
+            amount_delta = amount
+            desc = description or "Пополнение баланса"
+        else:
+            tx_type = Transaction.TYPE_PAYOUT
+            from_user = user
+            to_user = None
+            amount_delta = -amount
+            desc = description or "Вывод средств"
+            
+            if user.balance < amount:
+                return Response({"detail": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
+
         tx = Transaction(
             user=user,
+            from_user=from_user,
+            to_user=to_user,
             task=task,
             type=tx_type,
-            status=Transaction.STATUS_PENDING,
+            status=Transaction.STATUS_COMPLETED,
             amount=amount,
             currency=currency,
-            external_id=None,
+            description=desc,
             metadata=metadata,
         )
         tx.save()
 
-        # Создаем payment request.
-        pr = PaymentRequest(payment_type=payment_type, status=PaymentRequest.STATUS_PENDING, transaction=tx)
-        pr.stripe_payment_intent_id = f"stub_pi_{str(tx.id)}"
-        pr.webhook_payload = {"stub": True, "payment_type": payment_type}
+        pr = PaymentRequest(
+            payment_type=payment_type,
+            status=PaymentRequest.STATUS_COMPLETED,
+            transaction=tx,
+            stripe_payment_intent_id=f"stub_pi_{str(tx.id)}",
+            webhook_payload={"stub": True, "payment_type": payment_type},
+        )
         pr.save()
 
-        # Stripe webhook stub: в дипломе обрабатываем синхронно.
-        if payment_type == PaymentRequest.PAYMENT_PAY:
-            amount_delta = amount
-        else:
-            # withdraw: уменьшаем баланс, если хватает.
-            # MVP: проверяем в Python (не идеально атомарно, но в учебном проекте достаточно).
-            if user.balance < amount:
-                tx.status = Transaction.STATUS_FAILED
-                tx.save()
-                pr.status = PaymentRequest.STATUS_FAILED
-                pr.save()
-                return Response({"detail": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
-            amount_delta = -amount
-
-        # Обновляем баланс и статусы.
         pr.mark_completed(amount_delta=amount_delta)
         tx.status = Transaction.STATUS_COMPLETED
         tx.save()
 
-        tx_data = TransactionSerializer().to_representation(tx)
         return Response(
             {
-                "transaction": tx_data,
+                "transaction": TransactionSerializer().to_representation(tx),
                 "transaction_id": str(tx.id),
                 "payment_request_id": str(pr.id),
                 "status": pr.status,
             },
             status=status.HTTP_201_CREATED,
         )
-

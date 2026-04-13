@@ -65,12 +65,24 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   user_id: string;
+  from_user_id?: string | null;      // ← Новое поле
+  to_user_id?: string | null;        // ← Новое поле
+  from_user_name?: string | null;    // ← Новое поле
+  to_user_name?: string | null;      // ← Новое поле
+  description?: string;              // ← Новое поле
   task_id?: string | null;
-  amount: string; // DecimalField -> строка
+  amount: string;
   currency: string;
   external_id?: string | null;
   metadata: Record<string, unknown>;
   created_at?: string;
+}
+
+export interface TransferRequest {
+  to_user_id: string;
+  amount: string | number;
+  currency?: string;
+  description?: string;
 }
 
 export interface ApiErrorResponse {

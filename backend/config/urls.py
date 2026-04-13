@@ -39,8 +39,8 @@ router.register(r"quality/review", ReviewViewSet, basename="quality-review")
 router.register(r"quality/metrics", MetricsViewSet, basename="quality-metrics")
 
 # Финансы
-router.register(r"finance/transactions", TransactionViewSet, basename="transaction")
 router.register(r"finance/payments", PaymentViewSet, basename="payment")
+router.register(r"finance/transactions", TransactionViewSet, basename="transaction")
 
 urlpatterns = [
     # Django admin

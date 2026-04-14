@@ -20,7 +20,8 @@ type NavItem = {
 
 const items: NavItem[] = [
   { to: "/", label: "Дашборд", icon: "📊" },
-  { to: "/datasets", label: "Датасеты", icon: "📁" },
+  { to: "/projects", label: "Проекты", icon: "📁" },
+  { to: "/datasets", label: "Датасеты", icon: "📦" },
   { to: "/tasks", label: "Задачи", icon: "✅" },
   { to: "/labeling", label: "Разметка", icon: "🏷️" },
   { to: "/quality", label: "Качество", icon: "⭐" },

@@ -214,6 +214,89 @@ export const tasksAPI = {
   },
 };
 
+// ------------------ Projects API ------------------
+export interface Project {
+  id: string;
+  owner_id: string;
+  title: string;
+  description: string;
+  status: "open" | "active" | "closed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProjectRequest {
+  title: string;
+  description?: string;
+  status?: string;
+}
+
+export const projectsAPI = {
+  async create(body: CreateProjectRequest): Promise<Project> {
+    const res = await api.post<Project>("/api/projects/", body);
+    return res.data;
+  },
+  async list(params?: { limit?: number; offset?: number }): Promise<{ items: Project[]; total: number; limit: number; offset: number }> {
+    const res = await api.get<{ items: Project[]; total: number; limit: number; offset: number }>("/api/projects/", { params });
+    return res.data;
+  },
+  async get(id: string): Promise<Project> {
+    const res = await api.get<Project>(`/api/projects/${id}/`);
+    return res.data;
+  },
+  async update(id: string, body: Partial<CreateProjectRequest>): Promise<Project> {
+    const res = await api.patch<Project>(`/api/projects/${id}/`, body);
+    return res.data;
+  },
+  async delete(id: string): Promise<void> {
+    await api.delete(`/api/projects/${id}/`);
+  },
+};
+
+// ------------------ CV Annotation API ------------------
+export interface CVProject {
+  id: string;
+  title: string;
+  annotation_type: string;
+}
+
+export interface UploadResponse {
+  asset_id: string;
+  file_uri: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  frames_created: number;
+}
+
+export const cvAnnotationAPI = {
+  async createProject(title: string, annotation_type: string, description?: string): Promise<CVProject> {
+    const res = await api.post<CVProject>("/api/cv/projects/", { title, annotation_type, description });
+    return res.data;
+  },
+  async uploadFile(projectId: string, file: File): Promise<UploadResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    const res = await api.post<UploadResponse>(`/api/cv/projects/${projectId}/upload/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+  async getNextTask(projectId: string): Promise<{ task_id: string; frame_url: string; annotation_type: string; suggested_data: any }> {
+    const res = await api.get(`/api/cv/tasks/next/?project_id=${projectId}`);
+    return res.data;
+  },
+  async submitAnnotation(taskId: string, data: any): Promise<{ annotation_id: string; status: string }> {
+    const res = await api.post(`/api/cv/tasks/${taskId}/annotate/`, data);
+    return res.data;
+  },
+  async getProjectTasks(projectId: string): Promise<Array<{ task_id: string; status: string; frame_url: string | null }>> {
+    const res = await api.get(`/api/cv/projects/${projectId}/tasks/`);
+    return res.data;
+  },
+};
+
 // ------------------ Quality API ------------------
 export const qualityAPI = {
   async createReview(body: QualityReviewRequest): Promise<Record<string, unknown>> {

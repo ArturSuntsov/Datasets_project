@@ -34,22 +34,22 @@ logger = logging.getLogger(__name__)
 # ЭНДПОИНТ ME (защищённый)
 # =============================================================================
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.AllowAny])
 def me_view(request):
     """
     Получить текущего пользователя.
     GET /api/users/me/
-    
+
     Возвращает данные пользователя из JWT токена.
     """
     logger.info("=" * 60)
     logger.info("ME_VIEW: Запрос данных пользователя")
     logger.info(f"Headers: {dict(request.headers)}")
-    
+
     try:
         user = authenticate_from_jwt(request)
         logger.info(f"me_view: пользователь {user.email} запросил свои данные")
-        
+
         result = {
             'id': str(user.id),
             'email': user.email,
@@ -62,7 +62,7 @@ def me_view(request):
         }
         logger.info(f"me_view: возвращаем данные: {result}")
         return Response(result)
-        
+
     except PermissionError as e:
         logger.warning(f"me_view: ошибка аутентификации: {e}")
         return Response({'error': str(e)}, status=status.HTTP_401_UNAUTHORIZED)

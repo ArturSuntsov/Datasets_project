@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 from bson import ObjectId
 from django.http import HttpRequest
-from mongoengine import DoesNotExist
+from mongoengine import DoesNotExist, Q
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -32,7 +32,10 @@ class JWTRequiredMixin:
 
     def _get_user(self, request: HttpRequest):
         try:
-            return authenticate_from_jwt(request)
+            user = authenticate_from_jwt(request)
+            # Устанавливаем пользователя в request для использования в сериализаторах
+            request.user = user
+            return user
         except PermissionError:
             return None
 
@@ -132,6 +135,50 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
         project.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=["get"], url_path="tasks/next")
+    def tasks_next(self, request, pk: str = None, *args, **kwargs) -> Response:
+        """
+        GET /api/projects/{id}/tasks/next/
+        Получить следующую задачу для разметки в рамках проекта.
+        Доступно для owner проекта и annotator.
+        """
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+
+        if not ObjectId.is_valid(pk):
+            return Response({"detail": "Invalid project id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Проверяем, что проект существует
+        project = Project.objects(id=ObjectId(pk)).first()
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ищем следующую задачу в pending статусе для этого проекта
+        # Сортируем по difficulty_score (Active Learning)
+        
+        # Для annotator ищем задачи без назначенного исполнителя или назначенные текущему
+        if user.role == User.ROLE_ANNOTATOR:
+            task = Task.objects(
+                project=project,
+                status=Task.STATUS_PENDING
+            ).filter(
+                Q(annotator=None) | Q(annotator=user)
+            ).order_by("-difficulty_score", "created_at").first()
+        else:
+            # Для owner/admin - любую pending задачу
+            task = Task.objects(
+                project=project,
+                status=Task.STATUS_PENDING
+            ).order_by("-difficulty_score", "created_at").first()
+
+        if not task:
+            return Response({"detail": "No pending tasks available"}, status=status.HTTP_404_NOT_FOUND)
+
+        from .serializers import TaskSerializer
+        serializer = TaskSerializer(task, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 class TaskViewSet(JWTRequiredMixin, ViewSet):
     """
@@ -141,8 +188,19 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
     """
 
     def _base_qs(self, user):
-        # Доступ по владельцу dataset (project owner).
-        return Task.objects().where("dataset.owner", user).order_by("-created_at")
+        # MongoDB не поддерживает JOIN, поэтому:
+        # 1. Сначала получаем IDs датасетов пользователя
+        # 2. Потом ищем задачи по этим dataset_id
+        
+        from ..datasets_core.models import Dataset
+        user_dataset_ids = list(
+            Dataset.objects(owner=user).scalar('id')
+        )
+        
+        if not user_dataset_ids:
+            return Task.objects(status="does_not_exist")  # Пустой query
+        
+        return Task.objects(dataset__in=user_dataset_ids).order_by("-created_at")
 
     def _paginate(self, qs, request):
         try:

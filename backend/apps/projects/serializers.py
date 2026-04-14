@@ -166,6 +166,7 @@ class TaskSerializer(serializers.Serializer):
     def to_representation(self, instance: Task) -> Dict[str, Any]:
         return {
             "id": str(instance.id),
+            "task_id": str(instance.id),  # Для совместимости с фронтендом
             "project_id": str(instance.project.id) if instance.project else None,
             "dataset_id": str(instance.dataset.id),
             "annotator_id": str(instance.annotator.id) if instance.annotator else None,
@@ -173,6 +174,7 @@ class TaskSerializer(serializers.Serializer):
             "difficulty_score": instance.difficulty_score,
             "deadline_at": instance.deadline_at,
             "input_ref": instance.input_ref,
+            "frame_url": instance.input_ref,  # Для MVP: используем input_ref как URL изображения
             "created_at": instance.created_at,
             "updated_at": instance.updated_at,
         }

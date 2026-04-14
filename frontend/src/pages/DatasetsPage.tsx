@@ -41,6 +41,17 @@ export function DatasetsPage() {
     },
   });
 
+  // Получаем сообщение об ошибке
+  const errorMessage = React.useMemo(() => {
+    if (!createMutation.isError) return null;
+    
+    const error = createMutation.error as any;
+    return error?.response?.data?.detail || 
+           error?.response?.data?.error || 
+           error?.message ||
+           "Неизвестная ошибка";
+  }, [createMutation.isError, createMutation.error]);
+
   const total = datasetsQuery.data?.total ?? 0;
   const items = datasetsQuery.data?.items ?? [];
 
@@ -55,6 +66,7 @@ export function DatasetsPage() {
         
         <form className="space-y-4" onSubmit={(e) => {
           e.preventDefault();
+          console.log('📦 Creating dataset:', form);
           createMutation.mutate(form);
         }}>
           
@@ -129,8 +141,8 @@ export function DatasetsPage() {
               </svg>
               <div>
                 <p className="text-sm font-medium text-red-800 dark:text-red-300">Ошибка создания датасета</p>
-                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                  Проверьте правильность заполнения полей и попробуйте снова
+                <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-mono break-all">
+                  {errorMessage}
                 </p>
               </div>
             </div>

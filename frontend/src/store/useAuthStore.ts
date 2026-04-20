@@ -26,16 +26,26 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (body) => {
     set({ loading: true, error: null });
-    const res: AuthResponse = await authAPI.login(body);
-    setTokens(res.access, res.refresh ?? getRefreshToken());
+    try {
+      const res: AuthResponse = await authAPI.login(body);
+      setTokens(res.access, res.refresh ?? getRefreshToken());
 
-    set({
-      user: res.user,
-      accessToken: res.access,
-      refreshToken: res.refresh ?? getRefreshToken(),
-      isAuthenticated: true,
-      loading: false,
-    });
+      set({
+        user: res.user,
+        accessToken: res.access,
+        refreshToken: res.refresh ?? getRefreshToken(),
+        isAuthenticated: true,
+        loading: false,
+      });
+    } catch (e: any) {
+      // Показываем понятное сообщение об ошибке
+      const errorMsg = e?.response?.data?.error || 'Неверный логин или пароль';
+      set({
+        loading: false,
+        error: errorMsg,
+      });
+      throw e;
+    }
   },
 
   register: async (body) => {

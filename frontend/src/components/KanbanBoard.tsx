@@ -124,7 +124,15 @@ function TaskCard({ task, onDragStart }: TaskCardProps) {
         hover:shadow-md hover:border-primary-300 dark:hover:border-primary-600 hover:-translate-y-0.5
         transition-all duration-200 ${isDragging ? "opacity-50 scale-95" : "opacity-100"}`}
     >
-      {/* ID задачи */}
+
+      {/* Заголовок задачи */}
+      <div className="mb-2">
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
+          {task.title || `Задача #${task.id.slice(0, 6)}`}
+        </h4>
+      </div>
+
+      {/* ID задачи и сложность */}
       <div className="flex items-center justify-between mb-2">
         <code className="text-[10px] font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
           {task.id.slice(0, 8)}...

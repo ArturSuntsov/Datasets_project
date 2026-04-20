@@ -59,6 +59,7 @@ class User(Document):
 
     meta = {
         "collection": "users",
+        "strict": False,
         "indexes": [
             {"fields": ["email"], "unique": True},
             {"fields": ["username"], "unique": True},
@@ -67,6 +68,22 @@ class User(Document):
             "group_name",
         ],
     }
+
+    @property
+    def is_authenticated(self):
+        """
+        Возвращает True для аутентифицированных пользователей.
+        Требуется для DRF authentication.
+        """
+        return True
+
+    @property
+    def is_anonymous(self):
+        """
+        Возвращает False для реальных пользователей.
+        Требуется для DRF authentication.
+        """
+        return False
 
     def save(self, *args, **kwargs):
         start_time = time.time()

@@ -11,7 +11,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..datasets_core.models import Dataset
-from ..users.serializers import JWT_ACCESS_TTL_MINUTES  # noqa: F401 (используется позже в расширениях)
 from ..users.views import authenticate_from_jwt
 from .serializers import DatasetSerializer
 

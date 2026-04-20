@@ -57,6 +57,8 @@ class TaskSerializer(serializers.Serializer):
 
     annotator_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
+    title = serializers.CharField(max_length=500, required=False, default="Task")
+
     status = serializers.ChoiceField(choices=[c[0] for c in Task.STATUS_CHOICES], default=Task.STATUS_PENDING)
     difficulty_score = serializers.FloatField(required=False, default=0.5, min_value=0)
     deadline_at = serializers.DateTimeField(required=False, allow_null=True)
@@ -125,6 +127,7 @@ class TaskSerializer(serializers.Serializer):
             project=project,
             dataset=dataset,
             annotator=annotator,
+            title=validated_data.get("title", "Task"),
             status=status,
             difficulty_score=validated_data.get("difficulty_score", 0.5),
             deadline_at=validated_data.get("deadline_at"),
@@ -169,6 +172,7 @@ class TaskSerializer(serializers.Serializer):
             "project_id": str(instance.project.id) if instance.project else None,
             "dataset_id": str(instance.dataset.id),
             "annotator_id": str(instance.annotator.id) if instance.annotator else None,
+            "title": instance.title,
             "status": instance.status,
             "difficulty_score": instance.difficulty_score,
             "deadline_at": instance.deadline_at,

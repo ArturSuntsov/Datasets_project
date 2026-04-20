@@ -31,6 +31,7 @@ export interface Task {
   project_id?: string | null;
   dataset_id: string;
   annotator_id?: string | null;
+  title?: string;
   status: TaskStatus;
   difficulty_score: number;
   deadline_at?: string | null;

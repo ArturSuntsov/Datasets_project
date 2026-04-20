@@ -99,7 +99,7 @@ api.interceptors.response.use(
   },
   async (error: AxiosError<ApiErrorResponse>) => {
     console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
-    
+
     if (!isAxiosError(error)) {
       return Promise.reject(error);
     }
@@ -110,19 +110,22 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Не пытаемся refresh-ить для auth эндпоинтов — просто прокидываем ошибку
+    const url = config.url || '';
+    if (url.includes('/auth/login/') || url.includes('/auth/register/')) {
+      return Promise.reject(error);
+    }
+
     const status = response.status;
     const retriableConfig = config as RetriableConfig;
 
     if (status === 401 && !retriableConfig._retry) {
       retriableConfig._retry = true;
 
-      const nextAccess = await refreshAccessToken();
-      if (nextAccess) {
-        // Повторяем исходный запрос с новым access-токеном.
-        retriableConfig.headers = retriableConfig.headers ?? {};
-        retriableConfig.headers.Authorization = `Bearer ${nextAccess}`;
-        return api.request(retriableConfig);
-      }
+      // Токен истёк — очищаем и редиректим на логин
+      clearTokens();
+      window.location.href = '/login';
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

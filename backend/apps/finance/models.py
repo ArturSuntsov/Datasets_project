@@ -44,6 +44,7 @@ class Transaction(Document):
 
     meta = {
         "collection": "transactions",
+        "strict": False,
         "indexes": [
             "user", "from_user", "to_user", "status",
             ("created_at",), ("external_id",),
@@ -79,6 +80,7 @@ class PaymentRequest(Document):
 
     meta = {
         "collection": "payment_requests",
+        "strict": False,
         "indexes": [
             "status",
             "payment_type",

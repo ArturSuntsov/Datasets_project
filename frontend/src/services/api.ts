@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance, isAxiosError } from "axios";
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, isAxiosError } from "axios";
 import {
   AnnotateRequest,
   Annotation,
@@ -28,8 +28,10 @@ import {
   ReviewResolveResponse,
   Task,
   Transaction,
+  TransferRequest,
   User,
 } from "../types";
+
 
 const ACCESS_TOKEN_KEY = "dataset_ai_access_token";
 const REFRESH_TOKEN_KEY = "dataset_ai_refresh_token";
@@ -264,12 +266,34 @@ export const financeAPI = {
     const res = await api.get<ApiListResponse<Transaction>>("/api/finance/transactions/", { params });
     return res.data;
   },
+  
   async pay(body: PaymentRequestBody): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/pay/", body);
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/pay/", body);
     return res.data;
   },
+  
   async withdraw(body: PaymentRequestBody): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/withdraw/", body);
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/withdraw/", body);
+    return res.data;
+  },
+  
+  async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
+  // Отправляем то, что заполнил пользователь
+    const payload: Record<string, unknown> = {
+      amount: body.amount,
+      currency: body.currency || "USD",
+      description: body.description || "",
+    };
+    
+    if (body.to_username) {
+      payload.to_username = body.to_username;
+    } else if (body.to_email) {
+      payload.to_email = body.to_email;
+    } else if (body.to_user_id) {
+      payload.to_user_id = body.to_user_id;
+    }
+    
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", payload);
     return res.data;
   },
 };

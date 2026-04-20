@@ -6,10 +6,89 @@ export interface User {
   username: string;
   role: Role;
   rating?: number;
-  balance?: string;
+
   specialization?: string;
   group_name?: string;
   experience_level?: string;
+  balance?: string; // DecimalField чаще отдаётся строкой (MVP)
+}
+
+export type DatasetStatus = "draft" | "active" | "archived";
+
+export interface Dataset {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string;
+  status: DatasetStatus;
+  file_uri?: string | null;
+  schema_version: number;
+  metadata: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type TaskStatus = "pending" | "in_progress" | "review" | "completed" | "rejected";
+
+export interface Task {
+  id: string;
+  project_id?: string | null;
+  dataset_id: string;
+  annotator_id?: string | null;
+  status: TaskStatus;
+  difficulty_score: number;
+  deadline_at?: string | null;
+  input_ref?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type AnnotationStatus = "draft" | "submitted" | "pending_review" | "accepted" | "rejected";
+
+export type AnnotationFormat = "classification_v1" | "ner_v1" | "generic_v1";
+
+export interface Annotation {
+  id: string;
+  task_id: string;
+  dataset_id: string;
+  session_id?: string | null;
+  annotation_format: AnnotationFormat | string;
+  label_data: Record<string, unknown>;
+  predicted_data?: Record<string, unknown> | null;
+  status: AnnotationStatus | string;
+  is_final: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type TransactionType = "payment" | "payout" | "earnings";
+export type TransactionStatus = "pending" | "completed" | "failed" | "reversed";
+
+export interface Transaction {
+  id: string;
+  type: TransactionType;
+  status: TransactionStatus;
+  user_id: string;
+  from_user_id?: string | null;      // ← Новое поле
+  to_user_id?: string | null;        // ← Новое поле
+  from_user_name?: string | null;    // ← Новое поле
+  to_user_name?: string | null;      // ← Новое поле
+  description?: string;              // ← Новое поле
+  task_id?: string | null;
+  amount: string;
+  currency: string;
+  external_id?: string | null;
+  metadata: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface TransferRequest {
+  to_user_id?: string;      // опционально (можно не использовать)
+  to_username?: string;     // ← новое поле
+  to_email?: string;        // ← новое поле
+  amount: string | number;
+  currency?: string;
+  description?: string;
 }
 
 export interface ApiErrorResponse {

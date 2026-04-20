@@ -1,7 +1,7 @@
-import { Stage, Layer, Rect, Image as KonvaImage } from "react-konva";
-import { useState, useEffect } from "react";
+import { Stage, Layer, Rect, Image as KonvaImage, Text, Group } from "react-konva";
+import { useEffect, useMemo, useState } from "react";
+import { BoundingBox } from "../types";
 
-// Хук для загрузки изображения
 const useImageLoader = (url: string) => {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -12,184 +12,119 @@ const useImageLoader = (url: string) => {
       setLoading(false);
       return;
     }
-
+    setLoading(true);
+    setError(null);
     const img = new Image();
     img.crossOrigin = "anonymous";
-    
     img.onload = () => {
       setImage(img);
       setLoading(false);
     };
-    
     img.onerror = () => {
       setError("Failed to load image");
       setLoading(false);
     };
-
     img.src = url;
   }, [url]);
 
   return { image, loading, error };
 };
 
-type Box = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
 export default function AnnotationCanvas({
   imageUrl,
+  value,
+  currentLabel,
   onBoxesChange,
 }: {
   imageUrl: string;
-  onBoxesChange: (boxes: Box[]) => void;
+  value: BoundingBox[];
+  currentLabel: string;
+  onBoxesChange: (boxes: BoundingBox[]) => void;
 }) {
-  const [boxes, setBoxes] = useState<Box[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
-
   const { image, loading, error } = useImageLoader(imageUrl);
 
-  // Адаптивный размер canvas под изображение
   const maxWidth = 1000;
   const maxHeight = 700;
-  
-  let canvasWidth = maxWidth;
-  let canvasHeight = maxHeight;
+  const { canvasWidth, canvasHeight } = useMemo(() => {
+    if (!image) {
+      return { canvasWidth: maxWidth, canvasHeight: maxHeight };
+    }
+    const ratio = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+    return { canvasWidth: image.width * ratio, canvasHeight: image.height * ratio };
+  }, [image]);
 
-  if (image) {
-    const ratio = Math.min(
-      maxWidth / image.width,
-      maxHeight / image.height,
-      1
-    );
-    canvasWidth = image.width * ratio;
-    canvasHeight = image.height * ratio;
-  }
-
-  const handleMouseDown = (e: any) => {
-    const stage = e.target.getStage();
+  const handleMouseDown = (event: any) => {
+    const stage = event.target.getStage();
     const pos = stage.getPointerPosition();
     setDrawing(true);
     setStartPos(pos);
     setCurrentPos(pos);
   };
 
-  const handleMouseMove = (e: any) => {
+  const handleMouseMove = (event: any) => {
     if (!drawing) return;
-    const pos = e.target.getStage().getPointerPosition();
-    setCurrentPos(pos);
+    const stage = event.target.getStage();
+    setCurrentPos(stage.getPointerPosition());
   };
 
   const handleMouseUp = () => {
-    if (!drawing || !startPos || !currentPos) {
+    if (!drawing || !startPos || !currentPos || !currentLabel) {
       setDrawing(false);
       return;
     }
-
-    const newBox = {
+    const nextBox: BoundingBox = {
       x: Math.min(startPos.x, currentPos.x),
       y: Math.min(startPos.y, currentPos.y),
       width: Math.abs(currentPos.x - startPos.x),
       height: Math.abs(currentPos.y - startPos.y),
+      label: currentLabel,
     };
-
-    // Игнорируем слишком маленькие рамки
-    if (newBox.width > 10 && newBox.height > 10) {
-      const updated = [...boxes, newBox];
-      setBoxes(updated);
-      onBoxesChange(updated);
+    if (nextBox.width > 8 && nextBox.height > 8) {
+      onBoxesChange([...value, nextBox]);
     }
-
     setDrawing(false);
     setStartPos(null);
     setCurrentPos(null);
   };
 
   if (loading) {
-    return (
-      <div
-        className="flex items-center justify-center bg-gray-100 rounded-lg"
-        style={{ width: maxWidth, height: maxHeight }}
-      >
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading image...</p>
-        </div>
-      </div>
-    );
+    return <div className="flex h-[500px] items-center justify-center rounded-lg bg-gray-100 text-sm text-gray-500">Loading image...</div>;
   }
 
   if (error || !imageUrl) {
-    return (
-      <div
-        className="flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300"
-        style={{ width: maxWidth, height: maxHeight }}
-      >
-        <div className="text-center text-gray-500">
-          <p className="text-lg font-semibold mb-2">No Image Available</p>
-          <p className="text-sm">{error || "Task has no image URL"}</p>
-        </div>
-      </div>
-    );
+    return <div className="flex h-[500px] items-center justify-center rounded-lg border border-dashed border-gray-300 text-sm text-gray-500">{error || "No frame available"}</div>;
   }
 
   return (
-    <div className="relative">
-      <Stage
-        width={canvasWidth}
-        height={canvasHeight}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        className="border rounded-lg overflow-hidden"
-      >
+    <div className="space-y-3">
+      <Stage width={canvasWidth} height={canvasHeight} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <Layer>
-          {/* Отображение изображения */}
-          {image && (
-            <KonvaImage
-              image={image}
-              width={canvasWidth}
-              height={canvasHeight}
-            />
-          )}
-
-          {/* Сохраненные рамки */}
-          {boxes.map((box, idx) => (
-            <Rect
-              key={idx}
-              x={box.x}
-              y={box.y}
-              width={box.width}
-              height={box.height}
-              stroke="red"
-              strokeWidth={2}
-              dash={[5, 5]}
-            />
+          {image ? <KonvaImage image={image} width={canvasWidth} height={canvasHeight} /> : null}
+          {value.map((box, index) => (
+            <Group key={index}>
+              <Rect x={box.x} y={box.y} width={box.width} height={box.height} stroke="#ef4444" strokeWidth={2} />
+              <Text x={box.x} y={Math.max(0, box.y - 18)} text={box.label} fill="#ef4444" fontSize={14} fontStyle="bold" />
+            </Group>
           ))}
-
-          {/* Текущая рисуемая рамка */}
-          {drawing && startPos && currentPos && (
+          {drawing && startPos && currentPos ? (
             <Rect
               x={Math.min(startPos.x, currentPos.x)}
               y={Math.min(startPos.y, currentPos.y)}
               width={Math.abs(currentPos.x - startPos.x)}
               height={Math.abs(currentPos.y - startPos.y)}
-              stroke="blue"
+              stroke="#2563eb"
               strokeWidth={2}
-              dash={[10, 5]}
+              dash={[8, 4]}
             />
-          )}
+          ) : null}
         </Layer>
       </Stage>
-
-      {/* Информация */}
-      <div className="mt-2 text-sm text-gray-600 flex justify-between">
-        <span>Click and drag to draw bounding boxes</span>
-        <span>{boxes.length} box(es)</span>
+      <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+        <span>Selected label: {currentLabel || "Choose a label first"}</span>
+        <span>{value.length} boxes</span>
       </div>
     </div>
   );

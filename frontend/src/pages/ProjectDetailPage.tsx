@@ -1,323 +1,228 @@
-import React, { useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { projectsAPI, cvAnnotationAPI, Project, UploadResponse } from "../services/api";
+import { useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { projectsAPI, workflowAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [uploadQueue, setUploadQueue] = useState<File[]>([]);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [exportPayload, setExportPayload] = useState<string | null>(null);
 
-  const [project, setProject] = useState<Project | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const projectQuery = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => projectsAPI.get(projectId!),
+    enabled: !!projectId,
+  });
 
-  // Состояние для загрузки файлов
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadedFiles, setUploadedFiles] = useState<Array<{ name: string; uri: string }>>([]);
+  const overviewQuery = useQuery({
+    queryKey: ["project-overview", projectId],
+    queryFn: () => workflowAPI.overview(projectId!),
+    enabled: !!projectId,
+  });
 
-  // Состояние для задач
-  const [tasks, setTasks] = useState<Array<{ task_id: string; status: string; frame_url: string | null }>>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
-
-  // Загрузка данных проекта
-  React.useEffect(() => {
-    async function loadProject() {
-      if (!projectId) return;
-
-      try {
-        setLoading(true);
-        const data = await projectsAPI.get(projectId);
-        setProject(data);
-      } catch (err: any) {
-        console.error("Error loading project:", err);
-        setError(err.response?.data?.detail || "Failed to load project");
-      } finally {
-        setLoading(false);
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId || uploadQueue.length === 0) {
+        return null;
       }
-    }
-
-    loadProject();
-  }, [projectId]);
-
-  // Загрузка задач
-  React.useEffect(() => {
-    async function loadTasks() {
-      if (!projectId) return;
-
-      try {
-        setTasksLoading(true);
-        const data = await cvAnnotationAPI.getProjectTasks(projectId);
-        setTasks(data);
-      } catch (err: any) {
-        console.error("Error loading tasks:", err);
-        // Не критично - задачи могут отсут
-      } finally {
-        setTasksLoading(false);
+      let currentImportId = activeImportId;
+      let latest = null;
+      for (const file of uploadQueue) {
+        latest = await workflowAPI.upload(projectId, file, currentImportId);
+        currentImportId = latest.import_id;
       }
-    }
-
-    if (project) {
-      loadTasks();
-    }
-  }, [project, projectId]);
-
-  // Загрузка файлов
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !projectId) return;
-
-    const files = Array.from(e.target.files);
-    setUploading(true);
-    setUploadProgress(0);
-
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const result: UploadResponse = await cvAnnotationAPI.uploadFile(projectId, file);
-        
-        setUploadedFiles(prev => [...prev, {
-          name: result.file_name,
-          uri: result.file_uri,
-        }]);
-        
-        setUploadProgress(((i + 1) / files.length) * 100);
+      return latest;
+    },
+    onSuccess: (result) => {
+      if (result?.import_id) {
+        setActiveImportId(result.import_id);
       }
+      setUploadQueue([]);
+      setUploadError(null);
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (err: any) => {
+      setUploadError(err.response?.data?.detail || err.response?.data?.error || "Upload failed");
+    },
+  });
 
-      // Перезагружаем задачи
-      const updatedTasks = await cvAnnotationAPI.getProjectTasks(projectId);
-      setTasks(updatedTasks);
-    } catch (err: any) {
-      console.error("Error uploading files:", err);
-      alert(`Upload failed: ${err.response?.data?.error || err.message}`);
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
+  const finalizeMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !activeImportId) {
+        throw new Error("Nothing to finalize");
+      }
+      return workflowAPI.finalize(projectId, activeImportId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <LoadingSpinner size="lg" />
-          <p className="mt-4 text-gray-600">Loading project...</p>
-        </div>
-      </div>
-    );
+  const exportMutation = useMutation({
+    mutationFn: async () => workflowAPI.export(projectId!),
+    onSuccess: (payload) => {
+      setExportPayload(JSON.stringify(payload, null, 2));
+    },
+  });
+
+  const overview = overviewQuery.data;
+  const lastUploadPreview = uploadMutation.data?.preview;
+
+  const completion = useMemo(() => {
+    const total = Number(overview?.work_items?.total || 0);
+    const done = Number(overview?.work_items?.completed || 0);
+    return total > 0 ? Math.round((done / total) * 100) : 0;
+  }, [overview]);
+
+  if (projectQuery.isLoading) {
+    return <LoadingSpinner size="lg" />;
   }
 
-  if (error || !project) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
-          <h3 className="text-red-800 font-semibold mb-2">Error</h3>
-          <p className="text-red-600 mb-4">{error || "Project not found"}</p>
-          <button
-            onClick={() => navigate("/")}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
+  if (!projectQuery.data) {
+    return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">Project not found.</div>;
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Заголовок проекта */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {project.title}
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              {project.description || "No description"}
-            </p>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {projectQuery.data.project_type} / {projectQuery.data.annotation_type}
           </div>
-          <div className="flex gap-3">
-            <Link
-              to={`/projects/${projectId}/annotation`}
-              className="btn-primary"
-            >
-              🎯 Start Annotation
-            </Link>
-            <button
-              onClick={() => navigate(-1)}
-              className="btn-secondary"
-            >
-              ← Back
-            </button>
-          </div>
+          <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{projectQuery.data.title}</h1>
+          <p className="mt-3 max-w-3xl text-sm text-gray-600 dark:text-gray-400">{projectQuery.data.description}</p>
         </div>
+        <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+          {exportMutation.isPending ? "Exporting..." : "Export COCO JSON"}
+        </button>
+      </div>
 
-        {/* Информация о проекте */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="card p-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Status</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-white capitalize">
-              {project.status}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Tasks</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-white">
-              {tasks.length}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Files</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-white">
-              {uploadedFiles.length}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Created</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-white">
-              {new Date(project.created_at).toLocaleDateString("ru-RU")}
-            </p>
-          </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Frames</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.imports?.frames_total ?? 0}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Work items</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.work_items?.total ?? 0}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Pending review</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.reviews?.pending ?? 0}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Completion</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{completion}%</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Загрузка файлов */}
-        <div className="card">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            📤 Upload Files
-          </h2>
-
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-            <input
-              type="file"
-              multiple
-              accept="image/*,video/*"
-              onChange={handleFileUpload}
-              className="hidden"
-              id="file-upload"
-              disabled={uploading}
-            />
-            <label
-              htmlFor="file-upload"
-              className={`cursor-pointer ${
-                uploading ? "opacity-50 cursor-not-allowed" : "text-blue-600 hover:text-blue-700"
-              }`}
-            >
-              {uploading ? "Uploading..." : "Click to upload"}
-            </label>
-            <p className="text-sm text-gray-500 mt-2">
-              Supported: JPG, PNG, GIF, MP4, AVI, MOV (max 10MB each)
-            </p>
-
-            {uploading && (
-              <div className="mt-4">
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all"
-                    style={{ width: `${uploadProgress}%` }}
-                  ></div>
-                </div>
-                <p className="text-sm text-gray-600 mt-2">
-                  Uploading: {Math.round(uploadProgress)}%
-                </p>
-              </div>
-            )}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        <div className="card space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Import media</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Upload images or videos. Videos are split into frames using the project frame interval.</p>
           </div>
-
-          {/* Загруженные файлы */}
-          {uploadedFiles.length > 0 && (
-            <div className="mt-4">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Uploaded files:
-              </h3>
-              <div className="space-y-2">
-                {uploadedFiles.map((file, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 px-4 py-2 rounded"
-                  >
-                    <span className="text-sm truncate flex-1">
-                      {file.name}
-                    </span>
-                    <a
-                      href={file.uri}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 ml-4 text-sm"
-                    >
-                      View →
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Список задач */}
-        <div className="card">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            📋 Tasks
-          </h2>
-
-          {tasksLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <LoadingSpinner size="md" />
-            </div>
-          ) : tasks.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <p>No tasks yet. Upload files to create tasks.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {tasks.map((task) => (
-                <div
-                  key={task.task_id}
-                  className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 px-4 py-3 rounded-lg"
-                >
-                  <div className="flex-1">
-                    <p className="text-sm font-mono text-gray-900 dark:text-white">
-                      Task {task.task_id.slice(0, 8)}...
-                    </p>
-                    {task.frame_url && (
-                      <a
-                        href={task.frame_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        View image →
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`badge ${
-                        task.status === "done"
-                          ? "badge-success"
-                          : task.status === "in_progress"
-                          ? "badge-warning"
-                          : "badge-secondary"
-                      }`}
-                    >
-                      {task.status}
-                    </span>
-                    {task.status === "pending" && (
-                      <Link
-                        to={`/projects/${projectId}/annotation`}
-                        className="text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Annotate →
-                      </Link>
-                    )}
-                  </div>
+          <input
+            type="file"
+            multiple
+            accept="image/*,video/*"
+            onChange={(event) => setUploadQueue(Array.from(event.target.files ?? []))}
+            className="block w-full text-sm text-gray-600 dark:text-gray-300"
+          />
+          {uploadQueue.length > 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
+              {uploadQueue.map((file) => (
+                <div key={file.name} className="flex items-center justify-between py-1">
+                  <span>{file.name}</span>
+                  <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
+          <div className="flex flex-wrap gap-3">
+            <button className="btn-primary" type="button" onClick={() => uploadMutation.mutate()} disabled={uploadMutation.isPending || uploadQueue.length === 0}>
+              {uploadMutation.isPending ? "Uploading..." : "Upload to preview"}
+            </button>
+            <button className="btn-secondary" type="button" onClick={() => finalizeMutation.mutate()} disabled={!activeImportId || finalizeMutation.isPending}>
+              {finalizeMutation.isPending ? "Finalizing..." : "Finalize import"}
+            </button>
+          </div>
+          {uploadError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{uploadError}</div> : null}
+          {lastUploadPreview ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
+              <div>Processed assets: {lastUploadPreview.assets_processed}</div>
+              <div>Failed assets: {lastUploadPreview.assets_failed}</div>
+              <div>Frames detected: {lastUploadPreview.frames_total}</div>
+              {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Errors: {lastUploadPreview.errors.join("; ")}</div> : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="card space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Workflow configuration</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Fixed defaults for the MVP vertical slice.</p>
+          </div>
+          <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+            <div>Labels: {projectQuery.data.label_schema.map((item) => item.name).join(", ") || "—"}</div>
+            <div>Frame interval: {projectQuery.data.frame_interval_sec}s</div>
+            <div>Annotators per frame: {projectQuery.data.assignments_per_task}</div>
+            <div>Agreement threshold: {projectQuery.data.agreement_threshold}</div>
+            <div>IoU threshold: {projectQuery.data.iou_threshold}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
+            <div className="font-medium text-gray-900 dark:text-white">Instructions</div>
+            <div className="mt-2 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{projectQuery.data.instructions || "No instructions added yet."}</div>
+          </div>
         </div>
       </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Annotator quality snapshot</h2>
+          {overviewQuery.isFetching ? <span className="text-sm text-gray-500">Refreshing…</span> : null}
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="table min-w-full text-sm">
+            <thead>
+              <tr>
+                <th className="py-2 pr-3 text-left">Annotator</th>
+                <th className="py-2 pr-3 text-left">Rating</th>
+                <th className="py-2 pr-3 text-left">Open</th>
+                <th className="py-2 pr-3 text-left">Submitted</th>
+                <th className="py-2 pr-3 text-left">Conflict rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(overview?.annotators ?? []).map((annotator) => (
+                <tr key={annotator.user_id} className="border-t border-gray-100 dark:border-gray-800">
+                  <td className="py-2 pr-3">{annotator.username}</td>
+                  <td className="py-2 pr-3">{annotator.rating?.toFixed(2) ?? "0.00"}</td>
+                  <td className="py-2 pr-3">{annotator.open_assignments}</td>
+                  <td className="py-2 pr-3">{annotator.submitted_assignments}</td>
+                  <td className="py-2 pr-3">{annotator.conflict_rate?.toFixed(2) ?? "0.00"}</td>
+                </tr>
+              ))}
+              {(overview?.annotators ?? []).length === 0 ? (
+                <tr>
+                  <td className="py-4 text-gray-500" colSpan={5}>No annotators assigned yet.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {exportPayload ? (
+        <div className="card">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Export preview</h2>
+          <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg bg-gray-950 p-4 text-xs text-green-200">{exportPayload}</pre>
+        </div>
+      ) : null}
     </div>
   );
 }

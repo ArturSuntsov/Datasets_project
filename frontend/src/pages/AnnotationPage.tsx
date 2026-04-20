@@ -1,122 +1,117 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AnnotationCanvas from "../components/AnnotationCanvas";
-import { getNextTask, submitAnnotation } from "../api/cvApi";
-
+import { annotatorAPI } from "../services/api";
+import { BoundingBox } from "../types";
+import { LoadingSpinner } from "../components/LoadingSpinner";
 
 export default function AnnotationPage() {
-  const { projectId } = useParams();
+  const { assignmentId } = useParams<{ assignmentId: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [boxes, setBoxes] = useState<BoundingBox[]>([]);
+  const [comment, setComment] = useState("");
+  const [selectedLabel, setSelectedLabel] = useState("");
 
-  const [task, setTask] = useState<any>(null);
-  const [boxes, setBoxes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function loadTask() {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getNextTask(projectId!);
-      setTask(data);
-    } catch (err: any) {
-      console.error("Error loading task:", err);
-      setError(err.response?.data?.detail || "Failed to load task");
-      setTask(null);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSubmit() {
-    try {
-      setSubmitting(true);
-      setError(null);
-      await submitAnnotation(task.task_id, boxes);
-      await loadTask();
-    } catch (err: any) {
-      console.error("Error submitting annotation:", err);
-      setError(err.response?.data?.detail || "Failed to submit annotation");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const assignmentQuery = useQuery({
+    queryKey: ["annotator-assignment", assignmentId],
+    queryFn: () => annotatorAPI.detail(assignmentId!),
+    enabled: !!assignmentId,
+  });
 
   useEffect(() => {
-    loadTask();
-  }, [projectId]);
+    if (assignmentQuery.data) {
+      setBoxes(assignmentQuery.data.draft?.boxes ?? []);
+      setComment(assignmentQuery.data.comment ?? "");
+      setSelectedLabel((assignmentQuery.data.label_schema?.[0]?.name as string | undefined) ?? "");
+    }
+  }, [assignmentQuery.data]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading task...</p>
-        </div>
-      </div>
-    );
+  const submitMutation = useMutation({
+    mutationFn: (isFinal: boolean) => annotatorAPI.submit(assignmentId!, { label_data: { boxes }, comment, is_final: isFinal }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["annotator-queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["annotator-assignment", assignmentId] });
+      if (result.assignment_status === "submitted" || result.assignment_status === "accepted") {
+        navigate("/labeling");
+      }
+    },
+  });
+
+  const removeLast = () => setBoxes((current) => current.slice(0, -1));
+  const labels = useMemo(() => assignmentQuery.data?.label_schema ?? [], [assignmentQuery.data]);
+
+  if (assignmentQuery.isLoading) {
+    return <LoadingSpinner size="lg" />;
   }
 
-  if (error) {
+  if (!assignmentQuery.data) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
-          <h3 className="text-red-800 font-semibold mb-2">Error</h3>
-          <p className="text-red-600 mb-4">{error}</p>
-          <button
-            onClick={loadTask}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!task) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Tasks Available</h2>
-          <p className="text-gray-600">There are no pending tasks for this project.</p>
-        </div>
+      <div className="card p-8 text-center">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Assignment not found</h1>
+        <Link to="/labeling" className="btn-primary mt-4 inline-block">Back to queue</Link>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-2">Annotation Task</h1>
-        <div className="text-sm text-gray-600 space-y-1">
-          <p><strong>Task ID:</strong> {task.task_id}</p>
-          <p><strong>Status:</strong> {task.status}</p>
-          <p><strong>Difficulty:</strong> {task.difficulty_score}</p>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{assignmentQuery.data.project_title}</div>
+          <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">BBox Annotation</h1>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Assignment {assignmentQuery.data.assignment_id.slice(0, 8)} · frame {assignmentQuery.data.frame.frame_number}</p>
         </div>
+        <Link to="/labeling" className="btn-secondary">Back to queue</Link>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
-        <AnnotationCanvas
-          imageUrl={task.frame_url}
-          onBoxesChange={setBoxes}
-        />
-      </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr,0.36fr]">
+        <div className="card">
+          <AnnotationCanvas imageUrl={assignmentQuery.data.frame_url} value={boxes} currentLabel={selectedLabel} onBoxesChange={setBoxes} />
+        </div>
 
-      <div className="flex gap-4">
-        <button
-          onClick={handleSubmit}
-          disabled={submitting || boxes.length === 0}
-          className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting ? "Submitting..." : "Submit Annotation"}
-        </button>
-        <button
-          onClick={loadTask}
-          className="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700"
-        >
-          Skip Task
-        </button>
+        <div className="space-y-4">
+          <div className="card space-y-3">
+            <div className="text-lg font-semibold text-gray-900 dark:text-white">Labels</div>
+            <div className="flex flex-wrap gap-2">
+              {labels.map((label) => (
+                <button
+                  key={label.name}
+                  type="button"
+                  onClick={() => setSelectedLabel(label.name)}
+                  className={`rounded-full px-3 py-1 text-sm font-medium transition ${selectedLabel === label.name ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200"}`}
+                >
+                  {label.name}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn-secondary w-full" onClick={removeLast} disabled={boxes.length === 0}>
+              Remove last box
+            </button>
+          </div>
+
+          <div className="card space-y-3">
+            <div className="text-lg font-semibold text-gray-900 dark:text-white">Instructions</div>
+            <div className="whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">{assignmentQuery.data.instructions || "No project instructions added."}</div>
+          </div>
+
+          <div className="card space-y-3">
+            <div className="text-lg font-semibold text-gray-900 dark:text-white">Comment</div>
+            <textarea className="input-field min-h-[120px]" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Optional note for reviewer or project owner" />
+            {assignmentQuery.data.quality_signals?.too_fast ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Previous submission was flagged as unusually fast.</div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" className="btn-secondary" onClick={() => submitMutation.mutate(false)} disabled={submitMutation.isPending}>
+                Save draft
+              </button>
+              <button type="button" className="btn-primary" onClick={() => submitMutation.mutate(true)} disabled={submitMutation.isPending || boxes.length === 0}>
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

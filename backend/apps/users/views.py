@@ -55,6 +55,9 @@ def me_view(request):
             'email': user.email,
             'username': user.username,
             'role': user.role,
+            'specialization': user.specialization,
+            'group_name': user.group_name,
+            'experience_level': user.experience_level,
             'is_active': user.is_active,
             'rating': user.rating,
             'balance': str(user.balance) if user.balance else '0',
@@ -127,7 +130,7 @@ def register(request):
             return Response({'error': 'Password must be at least 4 characters'}, status=status.HTTP_400_BAD_REQUEST)
         
         # Проверка role
-        if role not in ['customer', 'annotator', 'admin']:
+        if role not in ['customer', 'annotator', 'reviewer', 'admin']:
             logger.warning(f"Invalid role: '{role}', using 'customer'")
             role = 'customer'
         
@@ -345,3 +348,36 @@ def authenticate_from_jwt(request: HttpRequest) -> User:
     elapsed = round(time.time() - start_time, 3)
     logger.info(f"Аутентификация успешна за {elapsed} сек: {user.email}")
     return user
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def participants_view(request):
+    """List annotators/reviewers for project setup."""
+    try:
+        user = authenticate_from_jwt(request)
+    except PermissionError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if user.role not in [User.ROLE_CUSTOMER, User.ROLE_ADMIN]:
+        return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    role = request.query_params.get('role')
+    query = {'is_active': True}
+    if role in [User.ROLE_ANNOTATOR, User.ROLE_REVIEWER]:
+        query['role'] = role
+    users = User.objects(**query).order_by('username')
+    return Response({
+        'items': [
+            {
+                'id': str(candidate.id),
+                'email': candidate.email,
+                'username': candidate.username,
+                'role': candidate.role,
+                'rating': candidate.rating,
+                'specialization': candidate.specialization,
+                'group_name': candidate.group_name,
+            }
+            for candidate in users
+        ]
+    })

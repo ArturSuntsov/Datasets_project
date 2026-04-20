@@ -65,7 +65,7 @@ export default function App() {
         }
       />
       <Route
-        path="/projects/:projectId/annotation"
+        path="/labeling/assignments/:assignmentId"
         element={
           <RequireAuth>
             <Layout>
@@ -73,6 +73,10 @@ export default function App() {
             </Layout>
           </RequireAuth>
         }
+      />
+      <Route
+        path="/projects/:projectId/annotation"
+        element={<Navigate to="/labeling" replace />}
       />
 
       {/* Остальные маршруты */}

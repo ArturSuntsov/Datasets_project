@@ -2,17 +2,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from mongoengine import CASCADE, DateTimeField, FloatField, IntField, Document, ReferenceField, StringField
+from mongoengine import (
+    BooleanField,
+    CASCADE,
+    DateTimeField,
+    DictField,
+    Document,
+    FloatField,
+    IntField,
+    ListField,
+    ReferenceField,
+    StringField,
+)
 
 from ..datasets_core.models import Dataset
 from ..users.models import User
 
 
 class Project(Document):
-    """
-    Проект заказчика: объединяет датасеты и задачи разметки.
-    """
-
     STATUS_OPEN = "open"
     STATUS_ACTIVE = "active"
     STATUS_CLOSED = "closed"
@@ -23,10 +30,40 @@ class Project(Document):
         (STATUS_CLOSED, "closed"),
     )
 
+    TYPE_STANDARD = "standard"
+    TYPE_CV = "cv"
+
+    TYPE_CHOICES = (
+        (TYPE_STANDARD, "standard"),
+        (TYPE_CV, "cv"),
+    )
+
+    ANNOTATION_GENERIC = "generic"
+    ANNOTATION_BBOX = "bbox"
+
+    ANNOTATION_CHOICES = (
+        (ANNOTATION_GENERIC, "generic"),
+        (ANNOTATION_BBOX, "bbox"),
+    )
+
     owner = ReferenceField(User, required=True, reverse_delete_rule=CASCADE)
     title = StringField(required=True, max_length=255)
-    description = StringField(default="", max_length=2000)
+    description = StringField(default="", max_length=4000)
     status = StringField(required=True, choices=[c[0] for c in STATUS_CHOICES], default=STATUS_ACTIVE)
+
+    project_type = StringField(required=True, choices=[c[0] for c in TYPE_CHOICES], default=TYPE_CV)
+    annotation_type = StringField(required=True, choices=[c[0] for c in ANNOTATION_CHOICES], default=ANNOTATION_BBOX)
+    instructions = StringField(default="")
+    label_schema = ListField(DictField(), default=list)
+    participant_rules = DictField(default=dict)
+
+    allowed_annotators = ListField(ReferenceField(User), default=list)
+    allowed_reviewers = ListField(ReferenceField(User), default=list)
+
+    frame_interval_sec = FloatField(default=1.0, min_value=0.1)
+    assignments_per_task = IntField(default=2, min_value=1)
+    agreement_threshold = FloatField(default=0.75, min_value=0.0, max_value=1.0)
+    iou_threshold = FloatField(default=0.5, min_value=0.0, max_value=1.0)
 
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
@@ -36,6 +73,7 @@ class Project(Document):
         "indexes": [
             "owner",
             "status",
+            "project_type",
             ("created_at", "-created_at"),
         ],
     }
@@ -45,12 +83,40 @@ class Project(Document):
         return super().save(*args, **kwargs)
 
 
+class ProjectMembership(Document):
+    ROLE_ANNOTATOR = "annotator"
+    ROLE_REVIEWER = "reviewer"
+
+    ROLE_CHOICES = (
+        (ROLE_ANNOTATOR, "annotator"),
+        (ROLE_REVIEWER, "reviewer"),
+    )
+
+    project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
+    user = ReferenceField(User, required=True, reverse_delete_rule=CASCADE)
+    role = StringField(required=True, choices=[c[0] for c in ROLE_CHOICES])
+    specialization = StringField(default="", max_length=255)
+    group_name = StringField(default="", max_length=255)
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        "collection": "project_memberships",
+        "indexes": [
+            {"fields": ["project", "user", "role"], "unique": True},
+            "user",
+            "role",
+        ],
+    }
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.utcnow()
+        return super().save(*args, **kwargs)
+
+
 class Task(Document):
-    """
-    Задача на разметку (labeling job).
-    Поддерживает состояние Kanban:
-    pending → in_progress → review → completed → rejected
-    """
+    """Legacy generic task model retained for the non-CV pages."""
 
     STATUS_PENDING = "pending"
     STATUS_IN_PROGRESS = "in_progress"
@@ -68,21 +134,11 @@ class Task(Document):
 
     project = ReferenceField(Project, null=True, reverse_delete_rule=CASCADE)
     dataset = ReferenceField(Dataset, required=True, reverse_delete_rule=CASCADE)
-
-    # Исполнитель (аннотатора) назначается для in_progress.
     annotator = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
-
-    # Active Learning: чем выше difficulty_score, тем раньше задача будет выбрана.
     difficulty_score = FloatField(required=True, default=0.5, min_value=0)
-
-    # Для контроля жизненного цикла.
     status = StringField(required=True, choices=[c[0] for c in STATUS_CHOICES], default=STATUS_PENDING)
     deadline_at = DateTimeField(null=True)
-
-    # Для MVP: какой именно фрагмент датасета размечается (chunk_id / item_id).
-    # Реальные данные будут в отдельном хранилище (S3/MinIO/GridFS).
-    input_ref = StringField(required=False, null=True, max_length=512)
-
+    input_ref = StringField(required=False, null=True, max_length=1024)
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
@@ -100,4 +156,3 @@ class Task(Document):
     def save(self, *args, **kwargs):
         self.updated_at = datetime.utcnow()
         return super().save(*args, **kwargs)
-

@@ -32,6 +32,7 @@ from apps.projects.models import Project, Task
 from apps.labeling.models import Annotation, LabelingSession
 from apps.quality.models import QualityMetric, QualityReview
 from apps.finance.models import Transaction, PaymentRequest
+from apps.cv_annotation.models import ImportSession, ImportAsset, FrameItem, WorkItem, Assignment, WorkAnnotation, ReviewRecord
 
 
 # =============================================================================
@@ -97,6 +98,7 @@ def _cleanup_database():
         Annotation, LabelingSession,
         QualityMetric, QualityReview,
         Transaction, PaymentRequest,
+        ImportSession, ImportAsset, FrameItem, WorkItem, Assignment, WorkAnnotation, ReviewRecord,
     ]
     for model in collections:
         try:
@@ -181,6 +183,29 @@ def user_inactive(db):
     user.set_password("password123")
     user.save()
     return user
+
+
+@pytest.fixture
+def user_reviewer(db):
+    user = User(
+        email="reviewer@example.com",
+        username="reviewer_user",
+        role=User.ROLE_REVIEWER,
+    )
+    user.set_password("password123")
+    user.save()
+    return user
+
+
+@pytest.fixture
+def jwt_token_reviewer(user_reviewer):
+    from apps.users.serializers import create_access_token
+    return create_access_token(user_reviewer)
+
+
+@pytest.fixture
+def auth_headers_reviewer(jwt_token_reviewer):
+    return {"HTTP_AUTHORIZATION": f"Bearer {jwt_token_reviewer}"}
 
 
 @pytest.fixture

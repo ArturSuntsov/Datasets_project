@@ -29,7 +29,6 @@ class QualityMetric(Document):
 
     meta = {
         "collection": "quality_metrics",
-        "strict": False,
         "indexes": [
             ("dataset", "task"),
             ("created_at",),
@@ -75,7 +74,6 @@ class QualityReview(Document):
 
     meta = {
         "collection": "quality_reviews",
-        "strict": False,
         "indexes": [
             ("task", "review_status"),
             ("dataset", "created_at"),

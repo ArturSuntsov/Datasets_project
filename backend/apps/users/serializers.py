@@ -8,11 +8,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import jwt
-from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from mongoengine import Q
 from rest_framework import serializers
@@ -22,40 +22,32 @@ from .models import User
 
 logger = logging.getLogger(__name__)
 
-# JWT настройки из Django settings
-def get_jwt_secret() -> str:
-    """Получить JWT secret key из Django settings."""
-    return getattr(settings, 'JWT_SECRET_KEY', 'dev-secret-change-me')
-
-def get_jwt_algorithm() -> str:
-    """Получить JWT algorithm из Django settings."""
-    return getattr(settings, 'JWT_ALGORITHM', 'HS256')
-
-def get_jwt_ttl() -> int:
-    """Получить JWT TTL из Django settings."""
-    return getattr(settings, 'JWT_ACCESS_TTL_MINUTES', 60)
+# JWT настройки из переменных окружения
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_ACCESS_TTL_MINUTES = int(os.getenv("JWT_ACCESS_TTL_MINUTES", "60"))
 
 
 def create_access_token(user: User) -> str:
     """
     Генерирует JWT access-token для пользователя.
-
+    
     Payload токена содержит:
     - sub: ID пользователя
     - role: роль пользователя
     - iat: время выпуска
     - exp: время истечения
-
+    
     Args:
         user: Пользователь для которого создается токен
-
+        
     Returns:
         str: JWT токен
     """
     logger.info(f"Создание JWT токена для пользователя: {user.email}")
-
+    
     now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=get_jwt_ttl())
+    exp = now + timedelta(minutes=JWT_ACCESS_TTL_MINUTES)
 
     payload: Dict[str, Any] = {
         "sub": str(user.id),
@@ -63,42 +55,42 @@ def create_access_token(user: User) -> str:
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
-
-    token = jwt.encode(payload, get_jwt_secret(), algorithm=get_jwt_algorithm())
+    
+    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     logger.info(f"JWT токен создан (exp: {exp})")
-
+    
     return token
 
 
 def decode_access_token(token: str) -> Dict[str, Any]:
     """
     Декодирует и проверяет JWT токен.
-
+    
     Проверяет:
     - Подпись токена
     - Срок действия (exp)
     - Наличие обязательных claims (sub, exp)
-
+    
     Args:
         token: JWT токен для декодирования
-
+        
     Returns:
         Dict: Payload токена
-
+        
     Raises:
         jwt.InvalidSignatureError: Если подпись невалидна
         jwt.ExpiredSignatureError: Если токен истек
         jwt.MissingRequiredClaimError: Если отсутствуют обязательные поля
     """
     logger.info("Декодирование JWT токена...")
-
+    
     payload = jwt.decode(
         token,
-        get_jwt_secret(),
-        algorithms=[get_jwt_algorithm()],
+        JWT_SECRET_KEY,
+        algorithms=[JWT_ALGORITHM],
         options={"require": ["exp", "sub"], "verify_exp": True},
     )
-
+    
     logger.info(f"Токен декодирован: sub={payload.get('sub')}")
     return payload
 

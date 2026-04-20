@@ -141,12 +141,8 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
     """
 
     def _base_qs(self, user):
-        # Получаем датасеты пользователя и фильтруем задачи по ним
-        user_dataset_ids = [str(d.id) for d in Dataset.objects(owner=user)]
-        if not user_dataset_ids:
-            # Если нет датасетов — возвращаем пустой queryset
-            return Task.objects(dataset__in=[]).order_by("-created_at")
-        return Task.objects(dataset__in=user_dataset_ids).order_by("-created_at")
+        # Доступ по владельцу dataset (project owner).
+        return Task.objects(dataset__owner=user).order_by("-created_at")
 
     def _paginate(self, qs, request):
         try:
@@ -195,23 +191,17 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
             return resp
         if not ObjectId.is_valid(pk):
             return Response({"detail": "Invalid id"}, status=status.HTTP_400_BAD_REQUEST)
-        task = Task.objects(id=ObjectId(pk)).first()
-        if not task or not self._has_access(task, user):
+        task = Task.objects(id=ObjectId(pk)).filter(dataset__owner=user).first()
+        if not task:
             return Response({"detail": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(TaskSerializer(task, context={"request": request}).data, status=status.HTTP_200_OK)
-
-    def _has_access(self, task, user):
-        """Проверка доступа пользователя к задаче через проект или датасет."""
-        if task.project:
-            return str(task.project.owner.id) == str(user.id)
-        return str(task.dataset.owner.id) == str(user.id)
 
     def update(self, request, pk: str = None, *args, **kwargs) -> Response:
         user, resp = self._require_user(request)
         if resp:
             return resp
-        task = Task.objects(id=ObjectId(pk)).first()
-        if not task or not self._has_access(task, user):
+        task = Task.objects(id=ObjectId(pk)).filter(dataset__owner=user).first()
+        if not task:
             return Response({"detail": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = TaskSerializer(data=request.data, context={"request": request})
@@ -224,8 +214,8 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
         user, resp = self._require_user(request)
         if resp:
             return resp
-        task = Task.objects(id=ObjectId(pk)).first()
-        if not task or not self._has_access(task, user):
+        task = Task.objects(id=ObjectId(pk)).filter(dataset__owner=user).first()
+        if not task:
             return Response({"detail": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
 
         data = dict(request.data)

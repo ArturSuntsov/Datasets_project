@@ -88,32 +88,73 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
 
     @action(detail=False, methods=["post"], url_path="transfer")
     def transfer(self, request, *args, **kwargs) -> Response:
-        """ Перевод денег между пользователями """
+        """
+        Перевод денег между пользователями.
+        Можно указать to_username, to_email или to_user_id
+        """
         user, resp = self._require_user(request)
         if resp:
             return resp
 
         data = dict(request.data)
-        to_user_id = data.get("to_user_id")
+        
+        # Получаем идентификатор получателя (может быть id, username или email)
+        to_identifier = data.get("to_username") or data.get("to_email") or data.get("to_user_id")
         amount_str = data.get("amount")
         description = data.get("description", "")
-
-        if not to_user_id or not ObjectId.is_valid(to_user_id):
-            return Response({"detail": "Invalid to_user_id"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not to_identifier:
+            return Response(
+                {"detail": "Укажите username, email или ID получателя"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             amount = Decimal(amount_str)
             if amount <= 0:
-                return Response({"detail": "Amount must be > 0"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "Сумма должна быть > 0"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         except:
-            return Response({"detail": "Invalid amount"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Неверная сумма"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        to_user = User.objects(id=ObjectId(to_user_id)).first()
+        # Ищем получателя по username, email или ID
+        to_user = None
+        
+        # Сначала пробуем найти по ID (если передан ObjectId)
+        if ObjectId.is_valid(to_identifier):
+            to_user = User.objects(id=ObjectId(to_identifier)).first()
+        
+        # Если не нашли, ищем по username
         if not to_user:
-            return Response({"detail": "Recipient not found"}, status=status.HTTP_404_NOT_FOUND)
+            to_user = User.objects(username=to_identifier).first()
+        
+        # Если не нашли, ищем по email
+        if not to_user:
+            to_user = User.objects(email=to_identifier.lower()).first()
+        
+        if not to_user:
+            return Response(
+                {"detail": f"Пользователь '{to_identifier}' не найден"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Нельзя переводить самому себе
+        if str(to_user.id) == str(user.id):
+            return Response(
+                {"detail": "Нельзя перевести деньги самому себе"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if user.balance < amount:
-            return Response({"detail": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Недостаточно средств"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Создаем транзакцию перевода
         tx = Transaction(
@@ -163,7 +204,10 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
             if ObjectId.is_valid(task_id):
                 task = Task.objects(id=ObjectId(task_id)).first()
                 if not task:
-                    return Response({"detail": "task_id not found"}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"detail": "task_id not found"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
         if payment_type == PaymentRequest.PAYMENT_PAY:
             tx_type = Transaction.TYPE_PAYMENT
@@ -179,7 +223,10 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
             desc = description or "Вывод средств"
             
             if user.balance < amount:
-                return Response({"detail": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "Недостаточно средств"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         tx = Transaction(
             user=user,

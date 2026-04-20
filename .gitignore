@@ -1,6 +1,5 @@
 # Python
 __pycache__/
-.mypy_cache/
 *.py[cod]
 *.so
 .Python
@@ -20,9 +19,6 @@ dist/
 .vscode/
 .idea/
 *.swp
-.qwen
-.vexp
-AGENTS.md
 
 # OS
 .DS_Store

@@ -31,7 +31,6 @@ export interface Task {
   project_id?: string | null;
   dataset_id: string;
   annotator_id?: string | null;
-  title?: string;
   status: TaskStatus;
   difficulty_score: number;
   deadline_at?: string | null;
@@ -80,7 +79,9 @@ export interface Transaction {
 }
 
 export interface TransferRequest {
-  to_user_id: string;
+  to_user_id?: string;      // опционально (можно не использовать)
+  to_username?: string;     // ← новое поле
+  to_email?: string;        // ← новое поле
   amount: string | number;
   currency?: string;
   description?: string;

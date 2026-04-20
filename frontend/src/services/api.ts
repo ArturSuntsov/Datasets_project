@@ -99,7 +99,7 @@ api.interceptors.response.use(
   },
   async (error: AxiosError<ApiErrorResponse>) => {
     console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
-
+    
     if (!isAxiosError(error)) {
       return Promise.reject(error);
     }
@@ -110,22 +110,19 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Не пытаемся refresh-ить для auth эндпоинтов — просто прокидываем ошибку
-    const url = config.url || '';
-    if (url.includes('/auth/login/') || url.includes('/auth/register/')) {
-      return Promise.reject(error);
-    }
-
     const status = response.status;
     const retriableConfig = config as RetriableConfig;
 
     if (status === 401 && !retriableConfig._retry) {
       retriableConfig._retry = true;
 
-      // Токен истёк — очищаем и редиректим на логин
-      clearTokens();
-      window.location.href = '/login';
-      return Promise.reject(error);
+      const nextAccess = await refreshAccessToken();
+      if (nextAccess) {
+        // Повторяем исходный запрос с новым access-токеном.
+        retriableConfig.headers = retriableConfig.headers ?? {};
+        retriableConfig.headers.Authorization = `Bearer ${nextAccess}`;
+        return api.request(retriableConfig);
+      }
     }
 
     return Promise.reject(error);
@@ -250,7 +247,22 @@ export const financeAPI = {
   },
   
   async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", body);
+  // Отправляем то, что заполнил пользователь
+    const payload: Record<string, unknown> = {
+      amount: body.amount,
+      currency: body.currency || "USD",
+      description: body.description || "",
+    };
+    
+    if (body.to_username) {
+      payload.to_username = body.to_username;
+    } else if (body.to_email) {
+      payload.to_email = body.to_email;
+    } else if (body.to_user_id) {
+      payload.to_user_id = body.to_user_id;
+    }
+    
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", payload);
     return res.data;
   },
 };

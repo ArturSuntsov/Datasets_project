@@ -1,31 +1,40 @@
+/**
+ * Боковая навигационная панель (Sidebar)
+ * 
+ * Особенности:
+ * - Увеличенная ширина (280px / w-72)
+ * - Правильные отступы в пунктах меню
+ * - Активные состояния с выделением
+ * - Hover-эффекты на всех пунктах
+ * - Поддержка тёмной темы
+ */
+
 import { NavLink } from "react-router-dom";
 import { useAuthStore } from "../store";
-import { Role } from "../types";
 
 type NavItem = {
   to: string;
   label: string;
   icon: string;
-  roles: Role[];
 };
 
 const items: NavItem[] = [
-  { to: "/", label: "Дашборд", icon: "📊", roles: ["customer", "annotator", "admin"] },
-  { to: "/datasets", label: "Датасеты", icon: "📁", roles: ["customer", "admin"] },
-  { to: "/tasks", label: "Задачи", icon: "✅", roles: ["customer", "annotator", "admin"] },
-  { to: "/labeling", label: "Разметка", icon: "🏷️", roles: ["annotator"] },
-  { to: "/quality", label: "Качество", icon: "⭐", roles: ["customer", "admin"] },
-  { to: "/finance", label: "Финансы", icon: "💰", roles: ["customer", "annotator", "admin"] },
-  { to: "/profile", label: "Профиль", icon: "👤", roles: ["customer", "annotator", "admin"] },
+  { to: "/", label: "Дашборд", icon: "📊" },
+  { to: "/datasets", label: "Датасеты", icon: "📁" },
+  { to: "/tasks", label: "Задачи", icon: "✅" },
+  { to: "/labeling", label: "Разметка", icon: "🏷️" },
+  { to: "/quality", label: "Качество", icon: "⭐" },
+  { to: "/finance", label: "Финансы", icon: "💰" },
+  { to: "/profile", label: "Профиль", icon: "👤" },
 ];
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
-  const role = user?.role;
-  const visibleItems = items.filter((item) => !role || item.roles.includes(role));
 
   return (
     <aside className="fixed left-0 top-0 h-full w-72 min-w-[280px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-colors duration-300 z-40">
+
+      {/* Логотип */}
       <div className="h-16 flex items-center px-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
         <NavLink to="/" className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
@@ -39,8 +48,9 @@ export function Sidebar() {
         </NavLink>
       </div>
 
+      {/* Меню навигации */}
       <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-        {visibleItems.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -58,6 +68,7 @@ export function Sidebar() {
         ))}
       </nav>
 
+      {/* Профиль пользователя внизу */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
         {user ? (
           <div className="flex items-center gap-3">

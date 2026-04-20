@@ -61,7 +61,6 @@ class User(Document):
     # Индексы для ускорения поиска и уникальности
     meta = {
         "collection": "users",
-        "strict": False,
         "indexes": [
             # ✅ Только уникальные индексы (они же работают как обычные для поиска)
             {"fields": ["email"], "unique": True},
@@ -70,22 +69,6 @@ class User(Document):
             {"fields": ["role", "is_active"]},
         ]
     }
-
-    @property
-    def is_authenticated(self):
-        """
-        Возвращает True для аутентифицированных пользователей.
-        Требуется для DRF authentication.
-        """
-        return True
-
-    @property
-    def is_anonymous(self):
-        """
-        Возвращает False для реальных пользователей.
-        Требуется для DRF authentication.
-        """
-        return False
 
     def save(self, *args, **kwargs):
         """Сохранение пользователя с обновлением timestamp и логированием."""

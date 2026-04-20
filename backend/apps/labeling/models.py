@@ -36,7 +36,7 @@ class LabelingSession(Document):
     started_at = DateTimeField(default=datetime.utcnow)
     completed_at = DateTimeField(null=True)
 
-    meta = {"collection": "labeling_sessions", "strict": False}
+    meta = {"collection": "labeling_sessions"}
 
     def save(self, *args, **kwargs):
         return super().save(*args, **kwargs)
@@ -110,7 +110,6 @@ class Annotation(Document):
 
     meta = {
         "collection": "annotations",
-        "strict": False,
         "indexes": [
             "task",
             "dataset",

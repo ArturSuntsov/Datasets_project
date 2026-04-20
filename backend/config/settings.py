@@ -122,20 +122,12 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 # =============================================================================
 # БАЗЫ ДАННЫХ
 # =============================================================================
-# Django требует DATABASES - используем SQLite для сессий/admin (MongoDB используется через mongoengine)
+# Django требует DATABASES - используем dummy для MongoDB
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.dummy',
     }
 }
-
-# =============================================================================
-# СЕССИИ
-# =============================================================================
-# Используем cache-based сессии через Redis (не требует SQL БД)
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
-SESSION_CACHE_ALIAS = 'default'
 
 # =============================================================================
 # КЭШИРОВАНИЕ
@@ -168,7 +160,6 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "apps.users.authentication.JWTAuthentication",  # ✅ JWT authentication
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_THROTTLE_CLASSES": [

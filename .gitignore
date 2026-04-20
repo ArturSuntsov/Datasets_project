@@ -22,6 +22,7 @@ dist/
 *.swp
 .qwen
 .vexp
+AGENTS.md
 
 # OS
 .DS_Store

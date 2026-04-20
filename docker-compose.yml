@@ -12,7 +12,9 @@ services:
     volumes:
       - mongo_data:/data/db
     environment:
-      MONGO_INITDB_DATABASE: ai_dataset_db
+      - MONGO_INITDB_DATABASE=ai_dataset_db
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
@@ -58,7 +60,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       # Монтирование кода для горячей перезагрузки
       - ./backend:/app
@@ -99,12 +101,12 @@ services:
     restart: unless-stopped
     environment:
       # URL API backend для frontend (переопределяет .env)
-      - VITE_API_URL=http://host.docker.internal:8000
+      - VITE_API_URL=http://host.docker.internal:8001
     depends_on:
       - web
     ports:
       # Vite использует порт 5173, мапим на 3000 для удобства
-      - "3000:5173"
+      - "3001:5173"
     volumes:
       # Монтирование кода для горячей перезагрузки
       - ./frontend:/app

@@ -38,12 +38,12 @@ export function DashboardPage() {
   // Карточки статистики
   const stats = [
     { 
-      label: "Датасеты", 
+      label: "Сбор датасетов", 
       value: datasetsTotal, 
       icon: "📁",
       color: "from-blue-500 to-blue-600",
       link: "/datasets",
-      description: "Всего датасетов"
+      description: "Собранные датасеты"
     },
     { 
       label: "Задачи в работе", 
@@ -130,22 +130,22 @@ export function DashboardPage() {
                   </div>
                   <div>
                     <p className="font-semibold text-gray-900 dark:text-white">Создать проект</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Создание и управление проектами</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Создание и управление</p>
                   </div>
                 </div>
               </Link>
 
               <Link
-                to="/tasks"
+                to="/labeling"
                 className="p-5 rounded-xl bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-900/10 border border-green-200 dark:border-green-800 hover:shadow-lg transition-all group"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-lg bg-green-600 dark:bg-green-500 flex items-center justify-center text-white text-xl group-hover:scale-110 transition-transform">
-                    ✅
+                    🏷️
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Задачи</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Посмотреть все</p>
+                    <p className="font-semibold text-gray-900 dark:text-white">Разметка датасетов</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Аннотация и отправка</p>
                   </div>
                 </div>
               </Link>
@@ -266,7 +266,7 @@ export function DashboardPage() {
                 <div className="flex-1">
                   <p className="font-medium text-gray-900 dark:text-white">Создайте первый датасет</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    <Link to="/datasets" className="text-primary-600 dark:text-primary-400 hover:underline">Добавьте датасет</Link> с описанием ваших данных
+                    <Link to="/datasets" className="text-primary-600 dark:text-primary-400 hover:underline">Перейдите в сбор датасетов</Link> и добавьте описание ваших данных
                   </p>
                 </div>
               </div>
@@ -277,7 +277,7 @@ export function DashboardPage() {
                 <div className="flex-1">
                   <p className="font-medium text-gray-900 dark:text-white">Добавьте задачи для разметки</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    <Link to="/tasks" className="text-primary-600 dark:text-primary-400 hover:underline">Создайте задачи</Link> и настройте параметры аннотации
+                    <Link to="/tasks" className="text-primary-600 dark:text-primary-400 hover:underline">Создайте задачи</Link> и настройте параметры аннотации для исполнителей
                   </p>
                 </div>
               </div>
@@ -286,9 +286,9 @@ export function DashboardPage() {
                   3
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-gray-900 dark:text-white">Пригласите аннотаторов</p>
+                  <p className="font-medium text-gray-900 dark:text-white">Запустите разметку датасетов</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    <Link to="/labeling" className="text-primary-600 dark:text-primary-400 hover:underline">Назначьте исполнителей</Link> для выполнения задач
+                    <Link to="/labeling" className="text-primary-600 dark:text-primary-400 hover:underline">Перейдите в раздел разметки</Link> и отправьте задачи на аннотацию
                   </p>
                 </div>
               </div>

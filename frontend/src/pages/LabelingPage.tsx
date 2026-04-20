@@ -24,11 +24,33 @@ export function LabelingPage() {
   const items = queueQuery.data?.items ?? [];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Annotator Queue</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Pick up assigned frames, continue drafts, and submit final boxes.</p>
+    <div className="space-y-4">
+      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Разметка датасетов</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Этот раздел отвечает только за аннотацию задач. Сбор и настройка датасетов выполняются в разделе "Сбор датасетов".
+        </p>
       </div>
+
+      {tasksQuery.isLoading || datasetQuery.isLoading ? <LoadingSpinner /> : null}
+
+      {tasksQuery.isError ? <div className="text-sm text-red-700">Ошибка загрузки задач</div> : null}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-1 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <div className="mb-3 text-sm font-semibold">Выбор задачи</div>
+          <select
+            value={selectedTaskId ?? ""}
+            onChange={(e) => setSelectedTaskId(e.target.value || null)}
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+          >
+            {tasks.length === 0 ? <option value="">Нет задач</option> : null}
+            {tasks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.id} ({t.dataset_id})
+              </option>
+            ))}
+          </select>
 
       {queueQuery.isLoading ? (
         <div className="card p-10 flex justify-center"><LoadingSpinner size="lg" /></div>

@@ -48,6 +48,22 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
+        '/media': {
+          target: apiUrl,
+          changeOrigin: true,
+          secure: false,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('❌ PROXY ERROR:', err.message);
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log(`📤 PROXY → Backend: ${req.method} ${req.url} → ${proxyReq.path}`);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log(`📥 Proxy ← Backend: ${req.method} ${req.url} → Status ${proxyRes.statusCode}`);
+            });
+          },
+        },
       },
     },
     build: {

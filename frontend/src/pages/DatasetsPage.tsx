@@ -46,6 +46,12 @@ export function DatasetsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="card">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Сбор датасетов</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Здесь создаются и управляются датасеты. Разметка выполняется в отдельном разделе "Разметка датасетов".
+        </p>
+      </div>
       
       {/* Форма создания датасета */}
       <div className="card">

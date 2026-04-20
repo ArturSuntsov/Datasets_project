@@ -77,6 +77,13 @@ export function LabelingPage() {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Разметка датасетов</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Этот раздел отвечает только за аннотацию задач. Сбор и настройка датасетов выполняются в разделе "Сбор датасетов".
+        </p>
+      </div>
+
       {tasksQuery.isLoading || datasetQuery.isLoading ? <LoadingSpinner /> : null}
 
       {tasksQuery.isError ? <div className="text-sm text-red-700">Ошибка загрузки задач</div> : null}

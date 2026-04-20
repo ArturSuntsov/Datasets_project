@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .card { border: 1px solid #ddd; padding: 20px; margin: 10px 0; border-radius: 8px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>🧪 API Test Page</h1>
+
+    <div class="card">
+        <h2>1. Login</h2>
+        <button onclick="testLogin()">Test Login</button>
+        <pre id="login-result"></pre>
+    </div>
+
+    <div class="card">
+        <h2>2. Create Project</h2>
+        <input type="text" id="project-title" placeholder="Project Title" value="Test Project" style="padding: 8px; margin: 5px 0;">
+        <br>
+        <button onclick="testCreateProject()">Create Project</button>
+        <pre id="project-result"></pre>
+    </div>
+
+    <div class="card">
+        <h2>3. Upload File</h2>
+        <input type="text" id="project-id" placeholder="Project ID" style="padding: 8px; margin: 5px 0;">
+        <br>
+        <input type="file" id="file-input" style="margin: 10px 0;">
+        <br>
+        <button onclick="testUpload()">Upload</button>
+        <pre id="upload-result"></pre>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+        let token = localStorage.getItem('dataset_ai_access_token');
+
+        async function testLogin() {
+            try {
+                const res = await fetch(`${API_BASE}/auth/login/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        identifier: 'customer@test.com',
+                        password: 'test123'
+                    })
+                });
+                const data = await res.json();
+                
+                document.getElementById('login-result').textContent = JSON.stringify(data, null, 2);
+                
+                if (data.access) {
+                    token = data.access;
+                    localStorage.setItem('dataset_ai_access_token', token);
+                    document.getElementById('login-result').className = 'success';
+                } else {
+                    document.getElementById('login-result').className = 'error';
+                }
+            } catch (err) {
+                document.getElementById('login-result').textContent = `Error: ${err.message}`;
+                document.getElementById('login-result').className = 'error';
+            }
+        }
+
+        async function testCreateProject() {
+            const title = document.getElementById('project-title').value;
+            if (!title) {
+                alert('Enter project title');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/cv/projects/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token && { 'Authorization': `Bearer ${token}` })
+                    },
+                    body: JSON.stringify({
+                        title: title,
+                        description: 'Test project from API test page',
+                        annotation_type: 'bbox'
+                    })
+                });
+                const data = await res.json();
+                
+                document.getElementById('project-result').textContent = JSON.stringify(data, null, 2);
+                
+                if (data.id) {
+                    document.getElementById('project-id').value = data.id;
+                    document.getElementById('project-result').className = 'success';
+                } else {
+                    document.getElementById('project-result').className = 'error';
+                }
+            } catch (err) {
+                document.getElementById('project-result').textContent = `Error: ${err.message}`;
+                document.getElementById('project-result').className = 'error';
+            }
+        }
+
+        async function testUpload() {
+            const projectId = document.getElementById('project-id').value;
+            const fileInput = document.getElementById('file-input');
+            
+            if (!projectId) {
+                alert('Enter project ID');
+                return;
+            }
+            if (!fileInput.files.length) {
+                alert('Select a file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const res = await fetch(`${API_BASE}/cv/projects/${projectId}/upload/`, {
+                    method: 'POST',
+                    headers: {
+                        ...(token && { 'Authorization': `Bearer ${token}` })
+                    },
+                    body: formData
+                });
+                const data = await res.json();
+                
+                document.getElementById('upload-result').textContent = JSON.stringify(data, null, 2);
+                
+                if (data.asset_id) {
+                    document.getElementById('upload-result').className = 'success';
+                } else {
+                    document.getElementById('upload-result').className = 'error';
+                }
+            } catch (err) {
+                document.getElementById('upload-result').textContent = `Error: ${err.message}`;
+                document.getElementById('upload-result').className = 'error';
+            }
+        }
+    </script>
+</body>
+</html>

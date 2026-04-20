@@ -1,157 +1,120 @@
-import React from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { datasetsAPI, qualityAPI } from "../services/api";
-import { ApiListResponse, Dataset, QualityMetricsItem, QualityReviewRequest } from "../types";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { reviewerAPI } from "../services/api";
+import { BoundingBox } from "../types";
+import { useAuthStore } from "../store";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 
 export function QualityPage() {
-  const [datasetId, setDatasetId] = React.useState<string>("");
+  const user = useAuthStore((s) => s.user);
+  const queryClient = useQueryClient();
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
+  const [resolutionJson, setResolutionJson] = useState<string>(JSON.stringify({ boxes: [] }, null, 2));
 
-  const datasetsQuery = useQuery<ApiListResponse<Dataset>>({
-    queryKey: ["quality-datasets"],
-    queryFn: () => datasetsAPI.list({ limit: 200, offset: 0 }),
+  const queueQuery = useQuery({
+    queryKey: ["reviewer-queue"],
+    queryFn: () => reviewerAPI.queue(),
+    enabled: user?.role === "reviewer" || user?.role === "admin",
   });
 
-  const metricsQuery = useQuery({
-    queryKey: ["quality-metrics", datasetId],
-    queryFn: () => qualityAPI.metrics(datasetId),
-    enabled: !!datasetId,
+  useEffect(() => {
+    if (!selectedReviewId && queueQuery.data?.items?.length) {
+      setSelectedReviewId(queueQuery.data.items[0].review_id);
+    }
+  }, [queueQuery.data, selectedReviewId]);
+
+  const reviewDetailQuery = useQuery({
+    queryKey: ["review-detail", selectedReviewId],
+    queryFn: () => reviewerAPI.detail(selectedReviewId!),
+    enabled: !!selectedReviewId,
   });
 
-  const reviewMutation = useMutation({
-    mutationFn: (body: QualityReviewRequest) => qualityAPI.createReview(body),
+  useEffect(() => {
+    if (reviewDetailQuery.data?.resolution) {
+      setResolutionJson(JSON.stringify(reviewDetailQuery.data.resolution, null, 2));
+    }
+  }, [reviewDetailQuery.data?.resolution]);
+
+  const resolveMutation = useMutation({
+    mutationFn: async () => reviewerAPI.resolve(selectedReviewId!, { resolution: JSON.parse(resolutionJson) }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["reviewer-queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["review-detail", selectedReviewId] });
+    },
   });
 
-  const [form, setForm] = React.useState<QualityReviewRequest>({
-    task_id: "",
-    annotation_a_id: "",
-    annotation_b_id: "",
-    arbitrator: null,
-    arbitration_requested: false,
-    arbitration_comment: null,
-  });
+  if (user?.role !== "reviewer" && user?.role !== "admin") {
+    return (
+      <div className="card p-8 text-center">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Review Queue</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Project owners can monitor quality from each project page. Review resolution is available to reviewers and admins.</p>
+      </div>
+    );
+  }
+
+  const items = queueQuery.data?.items ?? [];
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-        <div className="mb-2 text-sm font-semibold">Метрики качества</div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-1">
-            <div className="text-xs text-gray-600 dark:text-gray-300">Dataset</div>
-            <select
-              value={datasetId}
-              onChange={(e) => setDatasetId(e.target.value)}
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            >
-              <option value="">Выберите датасет</option>
-              {(datasetsQuery.data?.items ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.id})
-                </option>
-              ))}
-            </select>
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+      <div className="card">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reviewer Queue</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Resolve low-agreement tasks and produce the final annotation.</p>
+        {queueQuery.isLoading ? (
+          <div className="mt-6 flex justify-center"><LoadingSpinner size="lg" /></div>
+        ) : items.length === 0 ? (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">No disputed tasks right now.</div>
+        ) : (
+          <div className="mt-6 space-y-3">
+            {items.map((item) => (
+              <button
+                key={item.review_id}
+                type="button"
+                onClick={() => setSelectedReviewId(item.review_id)}
+                className={`w-full rounded-lg border p-4 text-left transition ${selectedReviewId === item.review_id ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.project_title}</div>
+                    <div className="mt-2 font-semibold text-gray-900 dark:text-white">Review {item.review_id.slice(0, 8)}</div>
+                  </div>
+                  <span className="badge badge-warning">agreement {item.agreement_score.toFixed(2)}</span>
+                </div>
+                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">{item.annotations.length} submissions · F1 {Number(item.metrics.f1 || 0).toFixed(2)}</div>
+              </button>
+            ))}
           </div>
-          <div className="flex items-end">
-            {metricsQuery.isLoading ? <LoadingSpinner label="Загрузка метрик..." /> : null}
-          </div>
-        </div>
-
-        {metricsQuery.isError ? <div className="mt-2 text-sm text-red-700">Не удалось загрузить метрики</div> : null}
-
-        {metricsQuery.data ? (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2 pr-3">Task</th>
-                  <th className="py-2 pr-3">Precision</th>
-                  <th className="py-2 pr-3">Recall</th>
-                  <th className="py-2 pr-3">F1</th>
-                  <th className="py-2 pr-3">Дата</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(metricsQuery.data.items as QualityMetricsItem[]).map((m) => (
-                  <tr key={m.task_id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="py-2 pr-3 font-mono text-xs">{m.task_id}</td>
-                    <td className="py-2 pr-3">{m.precision.toFixed(3)}</td>
-                    <td className="py-2 pr-3">{m.recall.toFixed(3)}</td>
-                    <td className="py-2 pr-3 font-semibold">{m.f1.toFixed(3)}</td>
-                    <td className="py-2 pr-3 text-xs text-gray-600 dark:text-gray-300">{m.created_at ?? "—"}</td>
-                  </tr>
-                ))}
-                {(metricsQuery.data.items ?? []).length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-3 text-sm text-gray-600">
-                      Нет метрик
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+        )}
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-        <div className="mb-2 text-sm font-semibold">Кросс-проверка</div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <input
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            placeholder="task_id"
-            value={form.task_id}
-            onChange={(e) => setForm((s) => ({ ...s, task_id: e.target.value }))}
-          />
-          <input
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            placeholder="annotation_a_id"
-            value={form.annotation_a_id}
-            onChange={(e) => setForm((s) => ({ ...s, annotation_a_id: e.target.value }))}
-          />
-          <input
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            placeholder="annotation_b_id"
-            value={form.annotation_b_id}
-            onChange={(e) => setForm((s) => ({ ...s, annotation_b_id: e.target.value }))}
-          />
-          <input
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-            placeholder="arbitrator (user id, опционально)"
-            value={form.arbitrator ?? ""}
-            onChange={(e) => setForm((s) => ({ ...s, arbitrator: e.target.value ? e.target.value : null }))}
-          />
-        </div>
-
-        <div className="mt-3 flex items-center gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={!!form.arbitration_requested} onChange={(e) => setForm((s) => ({ ...s, arbitration_requested: e.target.checked }))} />
-            Требовать арбитраж
-          </label>
-        </div>
-
-        {form.arbitration_requested ? (
-          <textarea
-            className="mt-3 w-full min-h-[90px] rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-3 text-sm outline-none focus:border-blue-500"
-            placeholder="Комментарий арбитра"
-            value={form.arbitration_comment ?? ""}
-            onChange={(e) => setForm((s) => ({ ...s, arbitration_comment: e.target.value || null }))}
-          />
-        ) : null}
-
-        <div className="mt-3">
-          <button
-            type="button"
-            className="rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800"
-            disabled={reviewMutation.isPending}
-            onClick={() => reviewMutation.mutate(form)}
-          >
-            Создать проверку
-          </button>
-        </div>
-
-        {reviewMutation.isError ? <div className="mt-2 text-sm text-red-700">Ошибка создания проверки</div> : null}
+      <div className="card space-y-4">
+        {!selectedReviewId || !reviewDetailQuery.data ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">Select a review from the queue to inspect annotations and resolve the dispute.</div>
+        ) : (
+          <>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{reviewDetailQuery.data.project_title}</div>
+              <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Resolve review {reviewDetailQuery.data.review_id.slice(0, 8)}</h2>
+            </div>
+            <img src={reviewDetailQuery.data.frame_url} alt="Frame under review" className="max-h-[420px] rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {reviewDetailQuery.data.annotations.map((annotation) => (
+                <div key={annotation.annotation_id} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+                  <div className="font-medium text-gray-900 dark:text-white">{annotation.annotator_username}</div>
+                  <pre className="mt-3 max-h-48 overflow-auto text-xs text-gray-700 dark:text-gray-300">{JSON.stringify(annotation.label_data, null, 2)}</pre>
+                  {annotation.comment ? <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{annotation.comment}</div> : null}
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Final resolution JSON</div>
+              <textarea className="input-field min-h-[220px] font-mono text-xs" value={resolutionJson} onChange={(event) => setResolutionJson(event.target.value)} />
+            </div>
+            <button className="btn-primary" type="button" onClick={() => resolveMutation.mutate()} disabled={resolveMutation.isPending}>
+              {resolveMutation.isPending ? "Resolving..." : "Resolve review"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
-

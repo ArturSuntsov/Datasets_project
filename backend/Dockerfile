@@ -2,10 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
+# Установка системных зависимостей (включая ffmpeg для обработки видео)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# Проверка что ffmpeg установлен
+RUN ffmpeg -version | head -1
 
 # Копирование requirements
 COPY requirements.txt .

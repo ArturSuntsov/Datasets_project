@@ -13,6 +13,11 @@ import { LabelingPage } from "./pages/LabelingPage";
 import { QualityPage } from "./pages/QualityPage";
 import { FinancePage } from "./pages/FinancePage";
 import { ProfilePage } from "./pages/ProfilePage";
+import CreateProjectPage from "./pages/CreateProjectPage";
+import ProjectDetailPage from "./pages/ProjectDetailPage";
+import ProjectsPage from "./pages/ProjectsPage";
+
+import AnnotationPage from "./pages/AnnotationPage";
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -27,6 +32,54 @@ export default function App() {
       <Route path="/register" element={<RegisterPage />} />
 
       {/* Защищённые страницы — с Layout */}
+
+      {/* Проекты (важно: /projects ДО /projects/:projectId) */}
+      <Route
+        path="/projects"
+        element={
+          <RequireAuth>
+            <Layout>
+              <ProjectsPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/create"
+        element={
+          <RequireAuth>
+            <Layout>
+              <CreateProjectPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId"
+        element={
+          <RequireAuth>
+            <Layout>
+              <ProjectDetailPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/labeling/assignments/:assignmentId"
+        element={
+          <RequireAuth>
+            <Layout>
+              <AnnotationPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId/annotation"
+        element={<Navigate to="/labeling" replace />}
+      />
+
+      {/* Остальные маршруты */}
       <Route
         path="/"
         element={
@@ -107,7 +160,6 @@ export default function App() {
           </RequireAuth>
         }
       />
-
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

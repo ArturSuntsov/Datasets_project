@@ -13,10 +13,12 @@ URL конфигурация проекта.
 
 from django.contrib import admin
 from django.urls import include, path
+from django.conf import settings
+from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 
 # Импорты ViewSet'ов для роутинга
-from apps.users.views import register, login, me_view
+from apps.users.views import register, login, me_view, participants_view
 from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView
 from apps.projects.views import ProjectViewSet, TaskViewSet
 from apps.labeling.views import AnnotationViewSet
@@ -55,6 +57,7 @@ urlpatterns = [
 
         # Пользователь (текущий)
         path("users/me/", me_view, name="user-me"),
+        path("users/participants/", participants_view, name="user-participants"),
 
         # Авторизация (function-based views)
         path("auth/register/", register, name="auth-register"),
@@ -66,7 +69,14 @@ urlpatterns = [
         
         # Остальные эндпоинты через router
     ] + router.urls)),
+    
+    # CV Annotation эндпоинты
+    path("api/", include("apps.cv_annotation.urls")),
 ]
+
+# Обслуживание медиафайлов (для разработки)
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # Заголовки для API документации
 admin.site.site_header = "Dataset AI Admin"

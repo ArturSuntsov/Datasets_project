@@ -61,7 +61,7 @@ export interface Annotation {
   updated_at?: string;
 }
 
-export type TransactionType = "payment" | "payout" | "earnings";
+export type TransactionType = "payment" | "payout" | "earnings" | "transfer";
 export type TransactionStatus = "pending" | "completed" | "failed" | "reversed";
 
 export interface Transaction {
@@ -127,23 +127,6 @@ export interface RegisterRequest {
   role?: Role;
 }
 
-export type DatasetStatus = "draft" | "active" | "archived";
-
-export interface Dataset {
-  id: string;
-  owner_id: string;
-  name: string;
-  description: string;
-  status: DatasetStatus;
-  file_uri?: string | null;
-  schema_version: number;
-  metadata: Record<string, unknown>;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export type TaskStatus = "pending" | "in_progress" | "review" | "completed" | "rejected";
-
 export interface DatasetCreateRequest {
   name: string;
   description?: string;
@@ -173,20 +156,6 @@ export interface TaskCreateRequest {
 
 export interface TaskUpdateRequest extends Partial<TaskCreateRequest> {
   status?: TaskStatus;
-}
-
-
-export interface Task {
-  id: string;
-  project_id?: string | null;
-  dataset_id: string;
-  annotator_id?: string | null;
-  status: TaskStatus;
-  difficulty_score: number;
-  deadline_at?: string | null;
-  input_ref?: string | null;
-  created_at?: string;
-  updated_at?: string;
 }
 
 export type ProjectStatus = "open" | "active" | "closed";
@@ -389,23 +358,6 @@ export interface ProjectExportPayload {
   };
 }
 
-export type AnnotationStatus = "draft" | "submitted" | "pending_review" | "accepted" | "rejected";
-export type AnnotationFormat = "classification_v1" | "ner_v1" | "generic_v1";
-
-export interface Annotation {
-  id: string;
-  task_id: string;
-  dataset_id: string;
-  session_id?: string | null;
-  annotation_format: AnnotationFormat | string;
-  label_data: Record<string, unknown>;
-  predicted_data?: Record<string, unknown> | null;
-  status: AnnotationStatus | string;
-  is_final: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
 export interface AnnotateRequest {
   label_data: Record<string, unknown>;
   is_final?: boolean;
@@ -433,31 +385,16 @@ export interface QualityMetricsItem {
   created_at?: string;
 }
 
-export type TransactionType = "payment" | "payout" | "earnings";
-export type TransactionStatus = "pending" | "completed" | "failed" | "reversed";
-
 export interface TransactionFilters {
   status?: TransactionStatus;
   limit?: number;
   offset?: number;
 }
 
-export interface Transaction {
-  id: string;
-  type: TransactionType;
-  status: TransactionStatus;
-  user_id: string;
-  task_id?: string | null;
-  amount: string;
-  currency: string;
-  external_id?: string | null;
-  metadata: Record<string, unknown>;
-  created_at?: string;
-}
-
 export interface PaymentRequestBody {
   amount: string | number;
   currency?: string;
   task_id?: string | null;
+  description?: string;
   metadata?: Record<string, unknown>;
 }

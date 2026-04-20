@@ -16,6 +16,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import CreateProjectPage from "./pages/CreateProjectPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import ProjectWorkflowPage from "./pages/ProjectWorkflowPage";
 
 import AnnotationPage from "./pages/AnnotationPage";
 
@@ -60,6 +61,16 @@ export default function App() {
           <RequireAuth>
             <Layout>
               <ProjectDetailPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId/workflow"
+        element={
+          <RequireAuth>
+            <Layout>
+              <ProjectWorkflowPage />
             </Layout>
           </RequireAuth>
         }

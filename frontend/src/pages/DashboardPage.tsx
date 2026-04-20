@@ -130,7 +130,7 @@ export function DashboardPage() {
                   </div>
                   <div>
                     <p className="font-semibold text-gray-900 dark:text-white">Создать проект</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">CV, текст, аудио</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Создание и управление проектами</p>
                   </div>
                 </div>
               </Link>

@@ -118,6 +118,12 @@ export interface ProjectLabel {
   name: string;
   color?: string;
   description?: string;
+  rules?: string[];
+  examples?: {
+    good?: string[];
+    bad?: string[];
+  };
+  attributes?: Record<string, boolean | string | number | null | undefined>;
 }
 
 export interface Project {

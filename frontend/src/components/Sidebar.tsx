@@ -11,22 +11,24 @@
 
 import { NavLink } from "react-router-dom";
 import { useAuthStore } from "../store";
+import { Role } from "../types";
 
 type NavItem = {
   to: string;
   label: string;
   icon: string;
+  roles: Role[];
 };
 
 const items: NavItem[] = [
-  { to: "/", label: "Дашборд", icon: "📊" },
-  { to: "/projects", label: "Проекты", icon: "📁" },
-  { to: "/datasets", label: "Датасеты", icon: "📦" },
-  { to: "/tasks", label: "Задачи", icon: "✅" },
-  { to: "/labeling", label: "Разметка", icon: "🏷️" },
-  { to: "/quality", label: "Качество", icon: "⭐" },
-  { to: "/finance", label: "Финансы", icon: "💰" },
-  { to: "/profile", label: "Профиль", icon: "👤" },
+  { to: "/", label: "Дашборд", icon: "📊", roles: ["customer", "annotator", "admin"] },
+  { to: "/projects", label: "Проекты", icon: "📁", roles: ["customer", "admin"] },
+  { to: "/datasets", label: "Датасеты", icon: "📁", roles: ["customer", "admin"] },
+  { to: "/tasks", label: "Задачи", icon: "✅", roles: ["customer", "annotator", "admin"] },
+  { to: "/labeling", label: "Разметка", icon: "🏷️", roles: ["annotator"] },
+  { to: "/quality", label: "Качество", icon: "⭐", roles: ["customer", "admin"] },
+  { to: "/finance", label: "Финансы", icon: "💰", roles: ["customer", "annotator", "admin"] },
+  { to: "/profile", label: "Профиль", icon: "👤", roles: ["customer", "annotator", "admin"] },
 ];
 
 export function Sidebar() {

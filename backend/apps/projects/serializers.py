@@ -33,6 +33,112 @@ class ProjectSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
+    def validate_label_schema(self, value: Any) -> List[Dict[str, Any]]:
+        """
+        label_schema хранится как список dict без строгой схемы (mongo DictField).
+        Но для UX и корректной разметки нам критично:
+        - непустые имена меток
+        - уникальность имён (case-insensitive)
+        - разумные лимиты на размер текста/количество элементов
+        - обратная совместимость (поля вроде `label` вместо `name`)
+        """
+
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("label_schema must be a list")
+
+        MAX_LABELS = 200
+        MAX_NAME_LEN = 64
+        MAX_DESC_LEN = 512
+        MAX_RULES = 50
+        MAX_EXAMPLES = 50
+        MAX_LINE_LEN = 280
+
+        if len(value) > MAX_LABELS:
+            raise serializers.ValidationError(f"label_schema is too large (max {MAX_LABELS})")
+
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+
+        def _clean_str(raw: Any, max_len: int) -> str:
+            if raw is None:
+                return ""
+            if not isinstance(raw, str):
+                raw = str(raw)
+            raw = raw.strip()
+            if len(raw) > max_len:
+                raw = raw[:max_len]
+            return raw
+
+        def _clean_str_list(raw: Any, max_items: int) -> List[str]:
+            if raw is None:
+                return []
+            if isinstance(raw, str):
+                # допускаем старый/упрощенный ввод строкой: делим по строкам
+                items = [line.strip() for line in raw.splitlines()]
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                return []
+            out: List[str] = []
+            for item in items:
+                s = _clean_str(item, MAX_LINE_LEN)
+                if not s:
+                    continue
+                out.append(s)
+                if len(out) >= max_items:
+                    break
+            return out
+
+        for idx, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"label_schema[{idx}] must be an object")
+
+            raw_name = item.get("name") or item.get("label") or item.get("title")
+            name = _clean_str(raw_name, MAX_NAME_LEN)
+            if not name:
+                raise serializers.ValidationError(f"label_schema[{idx}].name is required")
+
+            key = name.lower()
+            if key in seen:
+                raise serializers.ValidationError(f"Duplicate label name: {name}")
+            seen.add(key)
+
+            description = _clean_str(item.get("description"), MAX_DESC_LEN)
+            color = _clean_str(item.get("color"), 32) or None
+
+            rules = _clean_str_list(item.get("rules"), MAX_RULES) or None
+
+            examples_raw = item.get("examples")
+            examples: Dict[str, Any] | None = None
+            if isinstance(examples_raw, dict):
+                good = _clean_str_list(examples_raw.get("good"), MAX_EXAMPLES)
+                bad = _clean_str_list(examples_raw.get("bad"), MAX_EXAMPLES)
+                if good or bad:
+                    examples = {"good": good, "bad": bad}
+
+            # attributes оставляем "как есть" если dict, иначе игнорируем
+            attributes = item.get("attributes")
+            if not isinstance(attributes, dict):
+                attributes = None
+
+            payload: Dict[str, Any] = {"name": name}
+            if color:
+                payload["color"] = color
+            if description:
+                payload["description"] = description
+            if rules:
+                payload["rules"] = rules
+            if examples:
+                payload["examples"] = examples
+            if attributes:
+                payload["attributes"] = attributes
+
+            normalized.append(payload)
+
+        return normalized
+
     def _resolve_users(self, ids: List[str], role: str) -> List[User]:
         users: List[User] = []
         seen = set()

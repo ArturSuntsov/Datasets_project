@@ -21,8 +21,5 @@ RUN mkdir -p logs
 # Порт backend
 EXPOSE 8000
 
-# Используем entrypoint скрипт
-ENTRYPOINT ["/entrypoint.sh"]
-
 # Команда по умолчанию
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

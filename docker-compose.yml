@@ -1,0 +1,120 @@
+# Docker Compose конфигурация для проекта "Dataset для ИИ"
+# Сервисы: MongoDB, Redis, Backend (Django), Celery, Frontend (React)
+
+services:
+  # MongoDB - база данных
+  db:
+    image: mongo:7
+    container_name: dataset_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=ai_dataset_db
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Redis - очередь задач для Celery
+  redis:
+    image: redis:7-alpine
+    container_name: dataset_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend - Django API сервер
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dataset_backend
+    restart: unless-stopped
+    environment:
+      # MongoDB подключение через MONGO_URI (критично для mongoengine)
+      - MONGO_URI=mongodb://db:27017/ai_dataset_db?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000
+      # Redis для кэширования и Celery
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Настройки Django
+      - DEBUG=True
+      - BCRYPT_ROUNDS=4
+      - ALLOWED_HOSTS=*
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    volumes:
+      # Монтирование кода для горячей перезагрузки
+      - ./backend:/app
+
+  # Celery Worker - обработка фоновых задач
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dataset_celery
+    restart: unless-stopped
+    environment:
+      # MongoDB подключение
+      - MONGO_URI=mongodb://db:27017/ai_dataset_db?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000
+      # Redis для брокера сообщений
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DEBUG=True
+      - BCRYPT_ROUNDS=4
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Монтирование кода для горячей перезагрузки
+      - ./backend:/app
+    command: celery -A config worker --loglevel=info --pool=solo
+
+  # Frontend - React приложение на Vite
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dataset_frontend
+    restart: unless-stopped
+    environment:
+      # URL API backend для frontend (внутри Docker сети используем имя сервиса)
+      - VITE_API_URL=http://web:8000
+    depends_on:
+      - web
+    ports:
+      # Vite использует порт 5173, мапим на 3001 для удобства
+      - "3001:5173"
+    volumes:
+      # Монтирование кода для горячей перезагрузки
+      - ./frontend:/app
+      # Сохраняем node_modules внутри контейнера
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+
+# Именованные тома для сохранения данных
+volumes:
+  mongo_data:
+    # Данные MongoDB сохраняются между перезапусками
+    name: dataset_mongo_data

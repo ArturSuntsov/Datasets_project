@@ -4,15 +4,26 @@ import { financeAPI } from "../services/api";
 import { PaymentRequestBody, Transaction, ApiListResponse, TransferRequest } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
+import { isAnnotatorRole, isCustomerRole } from "../utils/roles";
+
+type FinanceTabId = "history" | "pay" | "withdraw" | "transfer";
+
+type FinanceTab = {
+  id: FinanceTabId;
+  label: string;
+};
 
 export function FinancePage() {
   const queryClient = useQueryClient();
-  const { user } = useAuthStore();
-  
+  const user = useAuthStore((s) => s.user);
+  const role = user?.role ?? "customer";
+  const isCustomer = isCustomerRole(role);
+  const isAnnotator = isAnnotatorRole(role);
+
   const [limit] = React.useState(20);
   const [offset, setOffset] = React.useState(0);
   const [status, setStatus] = React.useState<string>("");
-  const [activeTab, setActiveTab] = React.useState<"history" | "pay" | "withdraw" | "transfer">("history");
+  const [activeTab, setActiveTab] = React.useState<FinanceTabId>("history");
 
   const txQuery = useQuery<ApiListResponse<Transaction>>({
     queryKey: ["finance-transactions", user?.id, limit, offset, status],
@@ -42,48 +53,61 @@ export function FinancePage() {
   const total = txQuery.data?.total ?? 0;
   const items = txQuery.data?.items ?? [];
 
+  const availableTabs: FinanceTab[] = [
+    { id: "history", label: "📋 История" },
+    ...(isCustomer ? [{ id: "pay" as const, label: "💳 Пополнить" }] : []),
+    ...(isAnnotator ? [{ id: "withdraw" as const, label: "💸 Вывести" }] : []),
+    ...(isCustomer ? [{ id: "transfer" as const, label: "🔄 Перевод" }] : []),
+  ];
+
+  React.useEffect(() => {
+    if (!availableTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(availableTabs[0]?.id ?? "history");
+    }
+  }, [activeTab, availableTabs]);
+
   const getTransactionIcon = (type: string) => {
     switch (type) {
-      case "payment": return "💰";
-      case "payout": return "💸";
-      case "transfer": return "🔄";
-      case "earnings": return "⭐";
-      default: return "📝";
+      case "payment":
+        return "💰";
+      case "payout":
+        return "💸";
+      case "transfer":
+        return "🔄";
+      case "earnings":
+        return "⭐";
+      default:
+        return "📝";
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (txStatus: string) => {
     const badges: Record<string, string> = {
       pending: "badge-warning",
       completed: "badge-success",
       failed: "badge-error",
       reversed: "badge-secondary",
     };
-    return badges[status] || "badge-secondary";
+    return badges[txStatus] || "badge-secondary";
   };
 
   return (
     <div className="space-y-6">
-      {/* Заголовок */}
       <div className="pb-6 border-b border-gray-200 dark:border-gray-700">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">💰 Финансы</h1>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Управление балансом, пополнения и выплаты
+          {isCustomer
+            ? "Пополнение баланса и расчеты с исполнителями"
+            : "История начислений и вывод средств"}
         </p>
       </div>
 
-      {/* Вкладки */}
       <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
-        {[
-          { id: "history", label: "📋 История", icon: "📋" },
-          { id: "pay", label: "💳 Пополнить", icon: "💳" },
-          { id: "withdraw", label: "💸 Вывести", icon: "💸" },
-          { id: "transfer", label: "🔄 Перевод", icon: "🔄" },
-        ].map((tab) => (
+        {availableTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id as typeof activeTab)}
+            onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
               activeTab === tab.id
                 ? "bg-gradient-primary text-white shadow-md"
@@ -125,7 +149,7 @@ export function FinancePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={payForm.description || ""}
@@ -176,7 +200,7 @@ export function FinancePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={withdrawForm.description || ""}
@@ -271,15 +295,10 @@ export function FinancePage() {
         </div>
       )}
 
-      {/* История транзакций */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📋 История операций</h2>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="input-field w-auto"
-          >
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="input-field w-auto">
             <option value="">Все статусы</option>
             <option value="pending">В обработке</option>
             <option value="completed">Завершено</option>
@@ -288,7 +307,9 @@ export function FinancePage() {
         </div>
 
         {txQuery.isLoading ? (
-          <div className="py-12"><LoadingSpinner /></div>
+          <div className="py-12">
+            <LoadingSpinner />
+          </div>
         ) : txQuery.isError ? (
           <div className="py-12 text-center text-red-600">Ошибка загрузки</div>
         ) : items.length === 0 ? (
@@ -321,32 +342,26 @@ export function FinancePage() {
                         </span>
                       </td>
                       <td className="py-3 px-2 text-gray-700 dark:text-gray-300">
-                        {tx.type === "payment" && (
-                          <span>От: {tx.from_user_name || "Система"}</span>
-                        )}
-                        {tx.type === "payout" && (
-                          <span>Кому: {tx.to_user_name || "Система"}</span>
-                        )}
+                        {tx.type === "payment" && <span>От: {tx.from_user_name || "Система"}</span>}
+                        {tx.type === "payout" && <span>Кому: {tx.to_user_name || "Система"}</span>}
                         {tx.type === "transfer" && (
                           <span>
                             {tx.from_user_name || "—"} → {tx.to_user_name || "—"}
                           </span>
                         )}
-                        {tx.type === "earnings" && (
-                          <span>За задачу: {tx.task_id?.slice(0, 8)}...</span>
-                        )}
-                        {tx.description && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            {tx.description}
-                          </div>
-                        )}
+                        {tx.type === "earnings" && <span>За задачу: {tx.task_id?.slice(0, 8)}...</span>}
+                        {tx.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{tx.description}</div>}
                       </td>
                       <td className="py-3 px-2 font-medium">
-                        <span className={
-                          tx.type === "payment" || tx.type === "earnings" ? "text-green-600" 
-                          : tx.type === "payout" ? "text-red-600" 
-                          : "text-blue-600"
-                        }>
+                        <span
+                          className={
+                            tx.type === "payment" || tx.type === "earnings"
+                              ? "text-green-600"
+                              : tx.type === "payout"
+                                ? "text-red-600"
+                                : "text-blue-600"
+                          }
+                        >
                           {tx.type === "payout" ? "-" : tx.type === "payment" || tx.type === "earnings" ? "+" : ""}
                           {Number(tx.amount).toFixed(2)} {tx.currency}
                         </span>
@@ -368,7 +383,6 @@ export function FinancePage() {
               </table>
             </div>
 
-            {/* Пагинация */}
             <div className="mt-4 flex items-center justify-between">
               <button
                 type="button"

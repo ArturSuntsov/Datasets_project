@@ -215,6 +215,12 @@ class TaskViewSet(JWTRequiredMixin, ViewSet):
             return Response({"detail": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(TaskSerializer(task, context={"request": request}).data, status=status.HTTP_200_OK)
 
+    def _has_access(self, task, user):
+        """Проверка доступа пользователя к задаче через проект или датасет."""
+        if task.project:
+            return str(task.project.owner.id) == str(user.id)
+        return str(task.dataset.owner.id) == str(user.id)
+
     def update(self, request, pk: str = None, *args, **kwargs) -> Response:
         user, resp = self._require_user(request)
         if resp:

@@ -99,8 +99,8 @@ services:
     container_name: dataset_frontend
     restart: unless-stopped
     environment:
-      # URL API backend для frontend (переопределяет .env)
-      - VITE_API_URL=http://host.docker.internal:8001
+      # URL API backend для frontend (внутри Docker сети используем имя сервиса)
+      - VITE_API_URL=http://web:8000
     depends_on:
       - web
     ports:

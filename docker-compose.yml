@@ -64,7 +64,6 @@ services:
     volumes:
       # Монтирование кода для горячей перезагрузки
       - ./backend:/app
-    command: python manage.py runserver 0.0.0.0:8000
 
   # Celery Worker - обработка фоновых задач
   celery:
@@ -105,7 +104,7 @@ services:
     depends_on:
       - web
     ports:
-      # Vite использует порт 5173, мапим на 3000 для удобства
+      # Vite использует порт 5173, мапим на 3001 для удобства
       - "3001:5173"
     volumes:
       # Монтирование кода для горячей перезагрузки

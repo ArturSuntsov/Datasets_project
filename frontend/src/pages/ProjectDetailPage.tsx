@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectsAPI, workflowAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
@@ -96,9 +96,14 @@ export default function ProjectDetailPage() {
           <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{projectQuery.data.title}</h1>
           <p className="mt-3 max-w-3xl text-sm text-gray-600 dark:text-gray-400">{projectQuery.data.description}</p>
         </div>
-        <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-          {exportMutation.isPending ? "Exporting..." : "Export COCO JSON"}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link to={`/projects/${projectId}/workflow`} className="btn-secondary">
+            Настройка разметки
+          </Link>
+          <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+            {exportMutation.isPending ? "Exporting..." : "Export COCO JSON"}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">

@@ -11,12 +11,13 @@
 
 import { NavLink } from "react-router-dom";
 import { useAuthStore } from "../store";
+import { Role } from "../types";
 
 type NavItem = {
   to: string;
   label: string;
   icon: string;
-  roles: string[];
+  roles: Role[];
 };
 
 const items: NavItem[] = [

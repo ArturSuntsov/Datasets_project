@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
 from bson import ObjectId
 from rest_framework import serializers
 
 from ..datasets_core.models import Dataset
 from ..users.models import User
-from .models import Project, Task
+from .models import Project, ProjectMembership, Task
 
 
 class ProjectSerializer(serializers.Serializer):
@@ -18,24 +18,213 @@ class ProjectSerializer(serializers.Serializer):
     description = serializers.CharField(required=False, allow_blank=True, default="")
     status = serializers.ChoiceField(choices=[c[0] for c in Project.STATUS_CHOICES], default=Project.STATUS_ACTIVE)
 
+    project_type = serializers.ChoiceField(choices=[c[0] for c in Project.TYPE_CHOICES], default=Project.TYPE_CV)
+    annotation_type = serializers.ChoiceField(choices=[c[0] for c in Project.ANNOTATION_CHOICES], default=Project.ANNOTATION_BBOX)
+    instructions = serializers.CharField(required=False, allow_blank=True, default="")
+    label_schema = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    participant_rules = serializers.DictField(required=False, default=dict)
+    allowed_annotator_ids = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    allowed_reviewer_ids = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    frame_interval_sec = serializers.FloatField(required=False, default=1.0, min_value=0.1)
+    assignments_per_task = serializers.IntegerField(required=False, default=2, min_value=1)
+    agreement_threshold = serializers.FloatField(required=False, default=0.75, min_value=0.0, max_value=1.0)
+    iou_threshold = serializers.FloatField(required=False, default=0.5, min_value=0.0, max_value=1.0)
+
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate_label_schema(self, value: Any) -> List[Dict[str, Any]]:
+        """
+        label_schema хранится как список dict без строгой схемы (mongo DictField).
+        Но для UX и корректной разметки нам критично:
+        - непустые имена меток
+        - уникальность имён (case-insensitive)
+        - разумные лимиты на размер текста/количество элементов
+        - обратная совместимость (поля вроде `label` вместо `name`)
+        """
+
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("label_schema must be a list")
+
+        MAX_LABELS = 200
+        MAX_NAME_LEN = 64
+        MAX_DESC_LEN = 512
+        MAX_RULES = 50
+        MAX_EXAMPLES = 50
+        MAX_LINE_LEN = 280
+
+        if len(value) > MAX_LABELS:
+            raise serializers.ValidationError(f"label_schema is too large (max {MAX_LABELS})")
+
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+
+        def _clean_str(raw: Any, max_len: int) -> str:
+            if raw is None:
+                return ""
+            if not isinstance(raw, str):
+                raw = str(raw)
+            raw = raw.strip()
+            if len(raw) > max_len:
+                raw = raw[:max_len]
+            return raw
+
+        def _clean_str_list(raw: Any, max_items: int) -> List[str]:
+            if raw is None:
+                return []
+            if isinstance(raw, str):
+                # допускаем старый/упрощенный ввод строкой: делим по строкам
+                items = [line.strip() for line in raw.splitlines()]
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                return []
+            out: List[str] = []
+            for item in items:
+                s = _clean_str(item, MAX_LINE_LEN)
+                if not s:
+                    continue
+                out.append(s)
+                if len(out) >= max_items:
+                    break
+            return out
+
+        for idx, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"label_schema[{idx}] must be an object")
+
+            raw_name = item.get("name") or item.get("label") or item.get("title")
+            name = _clean_str(raw_name, MAX_NAME_LEN)
+            if not name:
+                raise serializers.ValidationError(f"label_schema[{idx}].name is required")
+
+            key = name.lower()
+            if key in seen:
+                raise serializers.ValidationError(f"Duplicate label name: {name}")
+            seen.add(key)
+
+            description = _clean_str(item.get("description"), MAX_DESC_LEN)
+            color = _clean_str(item.get("color"), 32) or None
+
+            rules = _clean_str_list(item.get("rules"), MAX_RULES) or None
+
+            examples_raw = item.get("examples")
+            examples: Dict[str, Any] | None = None
+            if isinstance(examples_raw, dict):
+                good = _clean_str_list(examples_raw.get("good"), MAX_EXAMPLES)
+                bad = _clean_str_list(examples_raw.get("bad"), MAX_EXAMPLES)
+                if good or bad:
+                    examples = {"good": good, "bad": bad}
+
+            # attributes оставляем "как есть" если dict, иначе игнорируем
+            attributes = item.get("attributes")
+            if not isinstance(attributes, dict):
+                attributes = None
+
+            payload: Dict[str, Any] = {"name": name}
+            if color:
+                payload["color"] = color
+            if description:
+                payload["description"] = description
+            if rules:
+                payload["rules"] = rules
+            if examples:
+                payload["examples"] = examples
+            if attributes:
+                payload["attributes"] = attributes
+
+            normalized.append(payload)
+
+        return normalized
+
+    def _resolve_users(self, ids: List[str], role: str) -> List[User]:
+        users: List[User] = []
+        seen = set()
+        for raw_id in ids:
+            if not ObjectId.is_valid(raw_id) or raw_id in seen:
+                continue
+            user = User.objects(id=ObjectId(raw_id), role=role, is_active=True).first()
+            if user:
+                users.append(user)
+                seen.add(raw_id)
+        return users
 
     def create(self, validated_data: Dict[str, Any]) -> Project:
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if not user:
             raise serializers.ValidationError("Authentication required.")
-        project = Project(owner=user, **validated_data)
+
+        annotator_ids = validated_data.pop("allowed_annotator_ids", [])
+        reviewer_ids = validated_data.pop("allowed_reviewer_ids", [])
+
+        annotators = self._resolve_users(annotator_ids, User.ROLE_ANNOTATOR)
+        reviewers = self._resolve_users(reviewer_ids, User.ROLE_REVIEWER)
+
+        project = Project(owner=user, allowed_annotators=annotators, allowed_reviewers=reviewers, **validated_data)
         project.save()
+
+        self._sync_memberships(project, annotators, reviewers)
         return project
 
     def update(self, instance: Project, validated_data: Dict[str, Any]) -> Project:
-        for field in ("title", "description", "status"):
+        annotator_ids = validated_data.pop("allowed_annotator_ids", None)
+        reviewer_ids = validated_data.pop("allowed_reviewer_ids", None)
+
+        for field in (
+            "title",
+            "description",
+            "status",
+            "project_type",
+            "annotation_type",
+            "instructions",
+            "label_schema",
+            "participant_rules",
+            "frame_interval_sec",
+            "assignments_per_task",
+            "agreement_threshold",
+            "iou_threshold",
+        ):
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
+
+        annotators = instance.allowed_annotators
+        reviewers = instance.allowed_reviewers
+        if annotator_ids is not None:
+            annotators = self._resolve_users(annotator_ids, User.ROLE_ANNOTATOR)
+            instance.allowed_annotators = annotators
+        if reviewer_ids is not None:
+            reviewers = self._resolve_users(reviewer_ids, User.ROLE_REVIEWER)
+            instance.allowed_reviewers = reviewers
+
         instance.save()
+        self._sync_memberships(instance, annotators, reviewers)
         return instance
+
+    def _sync_memberships(self, project: Project, annotators: List[User], reviewers: List[User]) -> None:
+        active_pairs = set()
+        for role, users in ((ProjectMembership.ROLE_ANNOTATOR, annotators), (ProjectMembership.ROLE_REVIEWER, reviewers)):
+            for user in users:
+                membership = ProjectMembership.objects(project=project, user=user, role=role).first()
+                if not membership:
+                    membership = ProjectMembership(
+                        project=project,
+                        user=user,
+                        role=role,
+                        specialization=user.specialization,
+                        group_name=user.group_name,
+                    )
+                membership.is_active = True
+                membership.save()
+                active_pairs.add((str(user.id), role))
+
+        for membership in ProjectMembership.objects(project=project):
+            key = (str(membership.user.id), membership.role)
+            if key not in active_pairs:
+                membership.is_active = False
+                membership.save()
 
     def to_representation(self, instance: Project) -> Dict[str, Any]:
         return {
@@ -44,6 +233,17 @@ class ProjectSerializer(serializers.Serializer):
             "title": instance.title,
             "description": instance.description,
             "status": instance.status,
+            "project_type": instance.project_type,
+            "annotation_type": instance.annotation_type,
+            "instructions": instance.instructions,
+            "label_schema": instance.label_schema or [],
+            "participant_rules": instance.participant_rules or {},
+            "allowed_annotator_ids": [str(user.id) for user in instance.allowed_annotators or []],
+            "allowed_reviewer_ids": [str(user.id) for user in instance.allowed_reviewers or []],
+            "frame_interval_sec": instance.frame_interval_sec,
+            "assignments_per_task": instance.assignments_per_task,
+            "agreement_threshold": instance.agreement_threshold,
+            "iou_threshold": instance.iou_threshold,
             "created_at": instance.created_at,
             "updated_at": instance.updated_at,
         }
@@ -51,11 +251,11 @@ class ProjectSerializer(serializers.Serializer):
 
 class TaskSerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)
-
     project_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     dataset_id = serializers.CharField()
-
     annotator_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    title = serializers.CharField(max_length=500, required=False, default="Task")
 
     status = serializers.ChoiceField(choices=[c[0] for c in Task.STATUS_CHOICES], default=Task.STATUS_PENDING)
     difficulty_score = serializers.FloatField(required=False, default=0.5, min_value=0)
@@ -70,33 +270,28 @@ class TaskSerializer(serializers.Serializer):
         project_id = attrs.get("project_id")
         annotator_id = attrs.get("annotator_id")
 
-        try:
-            dataset = Dataset.objects(id=dataset_id).first()
-            if not dataset:
-                raise serializers.ValidationError("Dataset не найден.")
-        except Exception:
-            raise serializers.ValidationError("Dataset не найден.")
+        dataset = Dataset.objects(id=dataset_id).first()
+        if not dataset:
+            raise serializers.ValidationError("Dataset not found.")
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if not user:
             raise serializers.ValidationError("Authentication required.")
-
-        # Безопасность: датасет может создавать только владелец.
         if str(dataset.owner.id) != str(user.id):
-            raise serializers.ValidationError("Вы не являетесь владельцем dataset.")
+            raise serializers.ValidationError("You are not dataset owner.")
 
         project = None
         if project_id:
             project = Project.objects(id=project_id, owner=user).first()
             if not project:
-                raise serializers.ValidationError("Project не найден или не принадлежит вам.")
+                raise serializers.ValidationError("Project not found or unavailable.")
 
         annotator = None
         if annotator_id:
             annotator = User.objects(id=annotator_id, role=User.ROLE_ANNOTATOR).first()
             if not annotator:
-                raise serializers.ValidationError("annotator_id не найден или не является исполнителем.")
+                raise serializers.ValidationError("annotator_id is invalid.")
 
         attrs["_dataset"] = dataset
         attrs["_project"] = project
@@ -104,27 +299,19 @@ class TaskSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data: Dict[str, Any]) -> Task:
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        if not user:
-            raise serializers.ValidationError("Authentication required.")
-
         dataset: Dataset = validated_data.pop("_dataset")
         project = validated_data.pop("_project")
         annotator = validated_data.pop("_annotator")
-
-        # Если нет annotator — остаемся в pending.
         status = validated_data.get("status") or Task.STATUS_PENDING
+        if annotator and status == Task.STATUS_PENDING:
+            status = Task.STATUS_IN_PROGRESS
         if not annotator:
             status = Task.STATUS_PENDING
-        if annotator and status == Task.STATUS_PENDING:
-            # Если исполнитель назначен, логичнее перевести в in_progress.
-            status = Task.STATUS_IN_PROGRESS
-
         task = Task(
             project=project,
             dataset=dataset,
             annotator=annotator,
+            title=validated_data.get("title", "Task"),
             status=status,
             difficulty_score=validated_data.get("difficulty_score", 0.5),
             deadline_at=validated_data.get("deadline_at"),
@@ -134,46 +321,31 @@ class TaskSerializer(serializers.Serializer):
         return task
 
     def update(self, instance: Task, validated_data: Dict[str, Any]) -> Task:
-        # Разрешаем менять только некоторые поля.
-        if "status" in validated_data:
-            instance.status = validated_data["status"]
-        if "difficulty_score" in validated_data:
-            instance.difficulty_score = validated_data["difficulty_score"]
-        if "deadline_at" in validated_data:
-            instance.deadline_at = validated_data["deadline_at"]
-        if "input_ref" in validated_data:
-            instance.input_ref = validated_data["input_ref"]
-
-        # assignment: если передали annotator_id.
+        for field in ("status", "difficulty_score", "deadline_at", "input_ref"):
+            if field in validated_data:
+                setattr(instance, field, validated_data[field])
         if "annotator_id" in validated_data:
             annotator_id = validated_data.get("annotator_id")
-            if not annotator_id:
-                instance.annotator = None
-            else:
-                instance.annotator = User.objects(id=annotator_id).first()
-
-        # project_id: опционально
+            instance.annotator = User.objects(id=annotator_id).first() if annotator_id else None
         if "project_id" in validated_data:
-            pid = validated_data.get("project_id")
-            if pid:
-                instance.project = Project.objects(id=pid).first()
-            else:
-                instance.project = None
-
+            project_id = validated_data.get("project_id")
+            instance.project = Project.objects(id=project_id).first() if project_id else None
         instance.save()
         return instance
 
     def to_representation(self, instance: Task) -> Dict[str, Any]:
         return {
             "id": str(instance.id),
+            "task_id": str(instance.id),
             "project_id": str(instance.project.id) if instance.project else None,
             "dataset_id": str(instance.dataset.id),
             "annotator_id": str(instance.annotator.id) if instance.annotator else None,
+            "title": instance.title,
             "status": instance.status,
             "difficulty_score": instance.difficulty_score,
             "deadline_at": instance.deadline_at,
             "input_ref": instance.input_ref,
+            "frame_url": instance.input_ref,
             "created_at": instance.created_at,
             "updated_at": instance.updated_at,
         }
-

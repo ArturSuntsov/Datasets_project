@@ -64,7 +64,6 @@ services:
     volumes:
       # Монтирование кода для горячей перезагрузки
       - ./backend:/app
-    command: python manage.py runserver 0.0.0.0:8000
 
   # Celery Worker - обработка фоновых задач
   celery:
@@ -100,12 +99,12 @@ services:
     container_name: dataset_frontend
     restart: unless-stopped
     environment:
-      # URL API backend для frontend (переопределяет .env)
-      - VITE_API_URL=http://host.docker.internal:8001
+      # URL API backend для frontend (внутри Docker сети используем имя сервиса)
+      - VITE_API_URL=http://web:8000
     depends_on:
       - web
     ports:
-      # Vite использует порт 5173, мапим на 3000 для удобства
+      # Vite использует порт 5173, мапим на 3001 для удобства
       - "3001:5173"
     volumes:
       # Монтирование кода для горячей перезагрузки

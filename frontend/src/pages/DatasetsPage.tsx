@@ -41,11 +41,28 @@ export function DatasetsPage() {
     },
   });
 
+  // Получаем сообщение об ошибке
+  const errorMessage = React.useMemo(() => {
+    if (!createMutation.isError) return null;
+    
+    const error = createMutation.error as any;
+    return error?.response?.data?.detail || 
+           error?.response?.data?.error || 
+           error?.message ||
+           "Неизвестная ошибка";
+  }, [createMutation.isError, createMutation.error]);
+
   const total = datasetsQuery.data?.total ?? 0;
   const items = datasetsQuery.data?.items ?? [];
 
   return (
     <div className="space-y-6">
+      <div className="card">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Сбор датасетов</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Здесь создаются и управляются датасеты. Разметка выполняется в отдельном разделе "Разметка датасетов".
+        </p>
+      </div>
       
       {/* Форма создания датасета */}
       <div className="card">
@@ -55,6 +72,7 @@ export function DatasetsPage() {
         
         <form className="space-y-4" onSubmit={(e) => {
           e.preventDefault();
+          console.log('📦 Creating dataset:', form);
           createMutation.mutate(form);
         }}>
           
@@ -129,8 +147,8 @@ export function DatasetsPage() {
               </svg>
               <div>
                 <p className="text-sm font-medium text-red-800 dark:text-red-300">Ошибка создания датасета</p>
-                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                  Проверьте правильность заполнения полей и попробуйте снова
+                <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-mono break-all">
+                  {errorMessage}
                 </p>
               </div>
             </div>

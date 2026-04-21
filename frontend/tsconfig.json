@@ -18,8 +18,9 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
-    }
+      "@/*": ["./src/*"]
+    },
+    "ignoreDeprecations": "5.0"
   },
   "include": ["src"],
   "exclude": ["src/tests"]

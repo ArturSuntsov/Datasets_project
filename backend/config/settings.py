@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "apps.labeling",
     "apps.quality",
     "apps.finance",
+    "apps.cv_annotation",
 ]
 
 # =============================================================================
@@ -122,12 +123,20 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 # =============================================================================
 # БАЗЫ ДАННЫХ
 # =============================================================================
-# Django требует DATABASES - используем dummy для MongoDB
+# Django требует DATABASES - используем SQLite для сессий/admin (MongoDB используется через mongoengine)
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.dummy',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# =============================================================================
+# СЕССИИ
+# =============================================================================
+# Используем cache-based сессии через Redis (не требует SQL БД)
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
 
 # =============================================================================
 # КЭШИРОВАНИЕ
@@ -157,18 +166,16 @@ CELERY_TIMEZONE = "UTC"
 # =============================================================================
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
+        "rest_framework.permissions.AllowAny",  # JWT проверяется вручную в views
     ],
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
-    ],
+    "DEFAULT_AUTHENTICATION_CLASSES": [],  # Отключаем стандартную аутентификацию (JWT вручную)
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "1000/hour",
+        "anon": "1000/hour",  # Увеличено для разработки (было 100)
+        "user": "10000/hour", # Увеличено для разработки (было 1000)
         "login": "10/hour",
         "register": "5/hour",
     },
@@ -181,6 +188,18 @@ REST_FRAMEWORK = {
 # =============================================================================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# =============================================================================
+# MEDIA FILES (загруженные пользователями файлы)
+# =============================================================================
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# Максимальный размер загружаемого файла (500MB для видео)
+MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", str(500 * 1024 * 1024)))
+
+# Разрешенные расширения
+ALLOWED_EXTENSIONS = os.getenv("ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,mp4,avi,mov,txt,csv,json").split(",")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # =============================================================================

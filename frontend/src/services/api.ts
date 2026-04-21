@@ -27,7 +27,7 @@ export function setTokens(accessToken: string, refreshToken?: string | null) {
       localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     }
   } catch {
-    // В учебном MVP игнорируем ошибки storage.
+    // ignore
   }
 }
 
@@ -36,12 +36,11 @@ export function clearTokens() {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   } catch {
-    // noop
+    // ignore
   }
 }
 
 function normalizeApiBaseUrl(): string {
-  // В дев-режиме Vite проксирует /api -> backend, поэтому baseURL оставляем пустым.
   return "";
 }
 
@@ -52,7 +51,6 @@ export const api: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
-// Отдельный клиент для refresh (чтобы избежать рекурсивных перехватов).
 const refreshClient: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
   timeout: 30000,
@@ -62,14 +60,11 @@ type RetriableConfig = AxiosRequestConfig & { _retry?: boolean };
 
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = getRefreshToken();
-
   const payload = refreshToken ? { refresh: refreshToken } : {};
-
   try {
     const res = await refreshClient.post<AuthResponse>("/api/auth/token/refresh/", payload, {
       headers: { "Content-Type": "application/json" },
     });
-
     const access = res.data.access;
     const nextRefresh = res.data.refresh;
     if (access) {
@@ -83,7 +78,7 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 api.interceptors.request.use((config) => {
-  console.log('🔵 Axios Request:', config.method?.toUpperCase(), config.url, config.baseURL || '');
+  console.log('🔵 Axios Request:', config.method?.toUpperCase(), config.url);
   const token = getAccessToken();
   if (token) {
     config.headers = config.headers ?? {};
@@ -99,32 +94,20 @@ api.interceptors.response.use(
   },
   async (error: AxiosError<ApiErrorResponse>) => {
     console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
-    
-    if (!isAxiosError(error)) {
-      return Promise.reject(error);
-    }
-
+    if (!isAxiosError(error)) return Promise.reject(error);
     const { response, config } = error;
-
-    if (!response || !config) {
-      return Promise.reject(error);
-    }
-
+    if (!response || !config) return Promise.reject(error);
     const status = response.status;
     const retriableConfig = config as RetriableConfig;
-
     if (status === 401 && !retriableConfig._retry) {
       retriableConfig._retry = true;
-
       const nextAccess = await refreshAccessToken();
       if (nextAccess) {
-        // Повторяем исходный запрос с новым access-токеном.
         retriableConfig.headers = retriableConfig.headers ?? {};
         retriableConfig.headers.Authorization = `Bearer ${nextAccess}`;
         return api.request(retriableConfig);
       }
     }
-
     return Promise.reject(error);
   }
 );
@@ -139,27 +122,15 @@ function extractDetail(err: unknown): string {
 // ------------------ Auth API ------------------
 export const authAPI = {
   async login(body: LoginRequest): Promise<AuthResponse> {
-    console.log('📤 authAPI.login():', { url: '/api/auth/login/', method: 'POST' });
     const res = await api.post<AuthResponse>("/api/auth/login/", body);
-    console.log('✅ authAPI.login() ответ:', res.status);
     return res.data;
   },
   async register(body: RegisterRequest): Promise<AuthResponse> {
-    console.log('📤 authAPI.register():', { url: '/api/auth/register/', method: 'POST', body: { email: body.email, username: body.username } });
-    console.trace('📦 Stack trace вызова register():');
-    
     const res = await api.post<AuthResponse>("/api/auth/register/", body);
-    
-    console.log('✅ authAPI.register() ответ:', res.status, { userId: res.data.user?.id });
-    // ⚠️ ВАЖНО: НЕ делать здесь никаких дополнительных запросов!
-    // НЕ вызывать: await authAPI.me() или api.get()
-    
     return res.data;
   },
   async me(): Promise<User> {
-    console.log('📤 authAPI.me():', { url: '/api/users/me/', method: 'GET' });
     const res = await api.get<User>("/api/users/me/");
-    console.log('✅ authAPI.me() ответ:', res.status);
     return res.data;
   },
 };
@@ -171,7 +142,6 @@ export const datasetsAPI = {
     return res.data;
   },
   async create(body: FormData | Record<string, unknown>): Promise<Dataset> {
-    // Если backend принимает FormData для загрузки файлов — используем его как есть.
     if (body instanceof FormData) {
       const res = await api.post<Dataset>("/api/datasets/", body, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -229,7 +199,7 @@ export const qualityAPI = {
   },
 };
 
-// ------------------ Finance API ------------------
+// ------------------ Finance API (✅ ИСПРАВЛЕНО) ------------------
 export const financeAPI = {
   async transactions(params?: { limit?: number; offset?: number; status?: string }): Promise<ApiListResponse<Transaction>> {
     const res = await api.get<ApiListResponse<Transaction>>("/api/finance/transactions/", { params });
@@ -246,8 +216,23 @@ export const financeAPI = {
     return res.data;
   },
   
+  // ✅ ИСПРАВЛЕНО: поддержка to_username и to_email
   async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", body);
+    const payload: Record<string, unknown> = {
+      amount: body.amount,
+      currency: body.currency || "USD",
+      description: body.description || "",
+    };
+    
+    if (body.to_username) {
+      payload.to_username = body.to_username;
+    } else if (body.to_email) {
+      payload.to_email = body.to_email;
+    } else if (body.to_user_id) {
+      payload.to_user_id = body.to_user_id;
+    }
+    
+    const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", payload);
     return res.data;
   },
 };
@@ -255,4 +240,3 @@ export const financeAPI = {
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));
 }
-

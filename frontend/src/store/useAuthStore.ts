@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { AuthResponse, LoginRequest, RegisterRequest, User } from "../types";
 import { authAPI, clearTokens, getAccessToken, getRefreshToken, setTokens } from "../services/api";
+import { QueryClient } from "@tanstack/react-query";
+
+// ✅ Создаём queryClient для очистки кэша при выходе
+const queryClient = new QueryClient();
 
 type AuthState = {
   user: User | null;
@@ -44,8 +48,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res: AuthResponse = await authAPI.register(body);
       
-      // ✅ ИСПРАВЛЕНИЕ: создаём объект user если его нет в ответе
-      // Бэкенд может возвращать user_id, email, username, role вместо user
       const user: User = res.user ?? {
         id: (res as any).user_id ?? '',
         email: (res as any).email ?? body.email,
@@ -55,13 +57,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       
       console.log('📦 [useAuthStore.register] Регистрация успешна:', { userId: user.id });
 
-      // ✅ Сохраняем токены только если они есть в ответе
       if (res.access) {
         setTokens(res.access, res.refresh ?? getRefreshToken());
       }
 
       set({
-        user: user,  // ✅ Теперь всегда объект User, не undefined
+        user: user,
         accessToken: res.access ?? getAccessToken(),
         refreshToken: res.refresh ?? getRefreshToken(),
         isAuthenticated: true,
@@ -79,8 +80,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  // ✅ ИСПРАВЛЕНО: очистка кэша React Query при выходе
   logout: () => {
     clearTokens();
+    queryClient.clear();
     set({
       user: null,
       accessToken: null,
@@ -96,7 +99,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user = await authAPI.me();
       set({ user, isAuthenticated: true, loading: false });
     } catch (e) {
-      // Если token протух/битый — сбрасываем авторизацию.
       clearTokens();
       set({
         user: null,
@@ -109,4 +111,3 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
-

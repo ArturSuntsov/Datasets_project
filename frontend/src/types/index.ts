@@ -6,7 +6,7 @@ export interface User {
   username: string;
   role: Role;
   rating?: number;
-  balance?: string; // DecimalField чаще отдаётся строкой (MVP)
+  balance?: string;
 }
 
 export type DatasetStatus = "draft" | "active" | "archived";
@@ -40,7 +40,6 @@ export interface Task {
 }
 
 export type AnnotationStatus = "draft" | "submitted" | "pending_review" | "accepted" | "rejected";
-
 export type AnnotationFormat = "classification_v1" | "ner_v1" | "generic_v1";
 
 export interface Annotation {
@@ -57,7 +56,8 @@ export interface Annotation {
   updated_at?: string;
 }
 
-export type TransactionType = "payment" | "payout" | "earnings";
+// ✅ ИСПРАВЛЕНО: добавлен "transfer"
+export type TransactionType = "payment" | "payout" | "earnings" | "transfer";
 export type TransactionStatus = "pending" | "completed" | "failed" | "reversed";
 
 export interface Transaction {
@@ -65,11 +65,11 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   user_id: string;
-  from_user_id?: string | null;      // ← Новое поле
-  to_user_id?: string | null;        // ← Новое поле
-  from_user_name?: string | null;    // ← Новое поле
-  to_user_name?: string | null;      // ← Новое поле
-  description?: string;              // ← Новое поле
+  from_user_id?: string | null;
+  to_user_id?: string | null;
+  from_user_name?: string | null;
+  to_user_name?: string | null;
+  description?: string;
   task_id?: string | null;
   amount: string;
   currency: string;
@@ -78,8 +78,11 @@ export interface Transaction {
   created_at?: string;
 }
 
+// ✅ ИСПРАВЛЕНО: добавлены поля для перевода по username/email
 export interface TransferRequest {
-  to_user_id: string;
+  to_user_id?: string;
+  to_username?: string;
+  to_email?: string;
   amount: string | number;
   currency?: string;
   description?: string;
@@ -115,8 +118,7 @@ export interface RegisterRequest {
 export interface AuthResponse {
   access: string;
   refresh?: string;
-  user?: User;  // ✅ Опционально: бэкенд может не возвращать
-  // ✅ Альтернативные поля которые может возвращать бэкенд
+  user?: User;
   user_id?: string;
   email?: string;
   username?: string;
@@ -201,6 +203,6 @@ export interface PaymentRequestBody {
   amount: string | number;
   currency?: string;
   task_id?: string | null;
+  description?: string;
   metadata?: Record<string, unknown>;
 }
-

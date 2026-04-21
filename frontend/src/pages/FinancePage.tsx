@@ -4,26 +4,15 @@ import { financeAPI } from "../services/api";
 import { PaymentRequestBody, Transaction, ApiListResponse, TransferRequest } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
-import { isAnnotatorRole, isCustomerRole } from "../utils/roles";
-
-type FinanceTabId = "history" | "pay" | "withdraw" | "transfer";
-
-type FinanceTab = {
-  id: FinanceTabId;
-  label: string;
-};
 
 export function FinancePage() {
   const queryClient = useQueryClient();
-  const user = useAuthStore((s) => s.user);
-  const role = user?.role ?? "customer";
-  const isCustomer = isCustomerRole(role);
-  const isAnnotator = isAnnotatorRole(role);
-
+  const { user } = useAuthStore();
+  
   const [limit] = React.useState(20);
   const [offset, setOffset] = React.useState(0);
   const [status, setStatus] = React.useState<string>("");
-  const [activeTab, setActiveTab] = React.useState<FinanceTabId>("history");
+  const [activeTab, setActiveTab] = React.useState<"history" | "pay" | "withdraw" | "transfer">("history");
 
   const txQuery = useQuery<ApiListResponse<Transaction>>({
     queryKey: ["finance-transactions", user?.id, limit, offset, status],
@@ -33,17 +22,44 @@ export function FinancePage() {
 
   const payMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.pay(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    onSuccess: () => {
+      console.log("✅ Пополнение успешно");
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка пополнения:", error);
+      alert("Ошибка пополнения: " + (error as Error).message);
+    },
   });
 
   const withdrawMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.withdraw(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    onSuccess: () => {
+      console.log("✅ Вывод успешен");
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка вывода:", error);
+      alert("Ошибка вывода: " + (error as Error).message);
+    },
   });
 
   const transferMutation = useMutation({
-    mutationFn: (body: TransferRequest) => financeAPI.transfer(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    mutationFn: (body: TransferRequest) => {
+      console.log("📤 Отправка перевода:", body);
+      return financeAPI.transfer(body);
+    },
+    onSuccess: (data) => {
+      console.log("✅ Перевод успешен:", data);
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+      alert("Перевод выполнен успешно!");
+      // Очистка формы
+      setTransferForm({ amount: "10", currency: "USD", description: "" });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка перевода:", error);
+      alert("Ошибка перевода: " + (error as Error).message);
+    },
   });
 
   const [payForm, setPayForm] = React.useState<PaymentRequestBody>({ amount: "10", currency: "USD", description: "" });
@@ -53,61 +69,67 @@ export function FinancePage() {
   const total = txQuery.data?.total ?? 0;
   const items = txQuery.data?.items ?? [];
 
-  const availableTabs: FinanceTab[] = [
-    { id: "history", label: "📋 История" },
-    ...(isCustomer ? [{ id: "pay" as const, label: "💳 Пополнить" }] : []),
-    ...(isAnnotator ? [{ id: "withdraw" as const, label: "💸 Вывести" }] : []),
-    ...(isCustomer ? [{ id: "transfer" as const, label: "🔄 Перевод" }] : []),
-  ];
-
-  React.useEffect(() => {
-    if (!availableTabs.some((tab) => tab.id === activeTab)) {
-      setActiveTab(availableTabs[0]?.id ?? "history");
-    }
-  }, [activeTab, availableTabs]);
-
   const getTransactionIcon = (type: string) => {
     switch (type) {
-      case "payment":
-        return "💰";
-      case "payout":
-        return "💸";
-      case "transfer":
-        return "🔄";
-      case "earnings":
-        return "⭐";
-      default:
-        return "📝";
+      case "payment": return "💰";
+      case "payout": return "💸";
+      case "transfer": return "🔄";
+      case "earnings": return "⭐";
+      default: return "📝";
     }
   };
 
-  const getStatusBadge = (txStatus: string) => {
+  const getStatusBadge = (status: string) => {
     const badges: Record<string, string> = {
       pending: "badge-warning",
       completed: "badge-success",
       failed: "badge-error",
       reversed: "badge-secondary",
     };
-    return badges[txStatus] || "badge-secondary";
+    return badges[status] || "badge-secondary";
+  };
+
+  // ✅ Обработчик отправки перевода
+  const handleTransfer = () => {
+    console.log("🖱️ Кнопка нажата, transferForm:", transferForm);
+    
+    // Проверка, что указан получатель
+    if (!transferForm.to_username && !transferForm.to_email && !transferForm.to_user_id) {
+      alert("Укажите username или email получателя");
+      return;
+    }
+    
+    // Проверка суммы
+    if (!transferForm.amount || Number(transferForm.amount) <= 0) {
+      alert("Укажите сумму больше 0");
+      return;
+    }
+    
+    transferMutation.mutate(transferForm);
   };
 
   return (
     <div className="space-y-6">
+      {/* Заголовок */}
       <div className="pb-6 border-b border-gray-200 dark:border-gray-700">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">💰 Финансы</h1>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {isCustomer
-            ? "Пополнение баланса и расчеты с исполнителями"
-            : "История начислений и вывод средств"}
+          Управление балансом, пополнения и выплаты
         </p>
       </div>
 
+      {/* Вкладки */}
       <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
-        {availableTabs.map((tab) => (
+        {[
+          { id: "history", label: "📋 История" },
+          { id: "pay", label: "💳 Пополнить" },
+          { id: "withdraw", label: "💸 Вывести" },
+          { id: "transfer", label: "🔄 Перевод" },
+        ].map((tab) => (
           <button
             key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
               activeTab === tab.id
                 ? "bg-gradient-primary text-white shadow-md"
@@ -221,7 +243,7 @@ export function FinancePage() {
         </div>
       )}
 
-      {/* Форма перевода */}
+      {/* ✅ Форма перевода — ИСПРАВЛЕНА */}
       {activeTab === "transfer" && (
         <div className="card max-w-md">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">🔄 Перевод пользователю</h2>
@@ -235,30 +257,20 @@ export function FinancePage() {
                 value={transferForm.to_username || transferForm.to_email || ""}
                 onChange={(e) => {
                   const value = e.target.value;
+                  console.log("📝 Ввод получателя:", value);
                   if (value.includes("@")) {
-                    setTransferForm((s) => ({ 
-                      ...s, 
-                      to_email: value, 
-                      to_username: undefined, 
-                      to_user_id: undefined 
-                    }));
+                    setTransferForm((s) => ({ ...s, to_email: value, to_username: undefined, to_user_id: undefined }));
                   } else {
-                    setTransferForm((s) => ({ 
-                      ...s, 
-                      to_username: value, 
-                      to_email: undefined, 
-                      to_user_id: undefined 
-                    }));
+                    setTransferForm((s) => ({ ...s, to_username: value, to_email: undefined, to_user_id: undefined }));
                   }
                 }}
                 className="input-field"
-                placeholder="customer@test.com  или  annotator"
+                placeholder="customer@test.com или annotator"
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Можно ввести email или username получателя
               </p>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Сумма</label>
               <input
@@ -266,14 +278,16 @@ export function FinancePage() {
                 step="0.01"
                 min="0.01"
                 value={transferForm.amount}
-                onChange={(e) => setTransferForm((s) => ({ ...s, amount: e.target.value }))}
+                onChange={(e) => {
+                  console.log("📝 Ввод суммы:", e.target.value);
+                  setTransferForm((s) => ({ ...s, amount: e.target.value }));
+                }}
                 className="input-field"
                 placeholder="25.00"
               />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={transferForm.description || ""}
@@ -282,11 +296,10 @@ export function FinancePage() {
                 placeholder="Оплата за разметку"
               />
             </div>
-
             <button
               type="button"
               disabled={transferMutation.isPending}
-              onClick={() => transferMutation.mutate(transferForm)}
+              onClick={handleTransfer}
               className="btn-primary w-full bg-green-600 hover:bg-green-700"
             >
               {transferMutation.isPending ? <LoadingSpinner size="sm" /> : "🔄 Отправить перевод"}
@@ -295,10 +308,15 @@ export function FinancePage() {
         </div>
       )}
 
+      {/* История транзакций */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">📋 История операций</h2>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="input-field w-auto">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="input-field w-auto"
+          >
             <option value="">Все статусы</option>
             <option value="pending">В обработке</option>
             <option value="completed">Завершено</option>
@@ -307,9 +325,7 @@ export function FinancePage() {
         </div>
 
         {txQuery.isLoading ? (
-          <div className="py-12">
-            <LoadingSpinner />
-          </div>
+          <div className="py-12"><LoadingSpinner /></div>
         ) : txQuery.isError ? (
           <div className="py-12 text-center text-red-600">Ошибка загрузки</div>
         ) : items.length === 0 ? (
@@ -342,26 +358,32 @@ export function FinancePage() {
                         </span>
                       </td>
                       <td className="py-3 px-2 text-gray-700 dark:text-gray-300">
-                        {tx.type === "payment" && <span>От: {tx.from_user_name || "Система"}</span>}
-                        {tx.type === "payout" && <span>Кому: {tx.to_user_name || "Система"}</span>}
+                        {tx.type === "payment" && (
+                          <span>От: {tx.from_user_name || "Система"}</span>
+                        )}
+                        {tx.type === "payout" && (
+                          <span>Кому: {tx.to_user_name || "Система"}</span>
+                        )}
                         {tx.type === "transfer" && (
                           <span>
                             {tx.from_user_name || "—"} → {tx.to_user_name || "—"}
                           </span>
                         )}
-                        {tx.type === "earnings" && <span>За задачу: {tx.task_id?.slice(0, 8)}...</span>}
-                        {tx.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{tx.description}</div>}
+                        {tx.type === "earnings" && (
+                          <span>За задачу: {tx.task_id?.slice(0, 8)}...</span>
+                        )}
+                        {tx.description && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {tx.description}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-2 font-medium">
-                        <span
-                          className={
-                            tx.type === "payment" || tx.type === "earnings"
-                              ? "text-green-600"
-                              : tx.type === "payout"
-                                ? "text-red-600"
-                                : "text-blue-600"
-                          }
-                        >
+                        <span className={
+                          tx.type === "payment" || tx.type === "earnings" ? "text-green-600" 
+                          : tx.type === "payout" ? "text-red-600" 
+                          : "text-blue-600"
+                        }>
                           {tx.type === "payout" ? "-" : tx.type === "payment" || tx.type === "earnings" ? "+" : ""}
                           {Number(tx.amount).toFixed(2)} {tx.currency}
                         </span>
@@ -383,6 +405,7 @@ export function FinancePage() {
               </table>
             </div>
 
+            {/* Пагинация */}
             <div className="mt-4 flex items-center justify-between">
               <button
                 type="button"

@@ -20,3 +20,6 @@ redis==5.0.1
 # Утилиты
 python-dotenv==1.0.0
 pillow==10.1.0
+
+# Транслитерация
+transliterate==1.10.2

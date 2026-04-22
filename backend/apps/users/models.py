@@ -1,33 +1,41 @@
+"""
+Модель пользователя для проекта "Сервис по сбору Dataset для ИИ".
+
+Использует bcrypt для хеширования паролей.
+Для разработки используется 4 раунда (быстро), для production - 12+.
+Добавлено детальное логирование для отладки блокировок.
+"""
+
 from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
-
 import bcrypt
+from datetime import datetime
 from django.conf import settings
 from mongoengine import (
-    BooleanField,
-    DateTimeField,
-    DecimalField,
-    EmailField,
-    FloatField,
-    IntField,
-    ListField,
-    StringField,
-    Document,
+    BooleanField, DateTimeField, Document, DecimalField, EmailField,
+    FloatField, StringField, ListField
 )
 
 logger = logging.getLogger(__name__)
 
 
 class User(Document):
-    """Application user stored in MongoDB."""
+    """
+    Кастомный пользователь (MongoEngine). Пароль хранится только в виде хеша.
 
-    ROLE_CUSTOMER = "customer"
-    ROLE_ANNOTATOR = "annotator"
-    ROLE_REVIEWER = "reviewer"
-    ROLE_ADMIN = "admin"
+    Роли:
+    - customer: заказчик (создает датасеты и задачи)
+    - annotator: исполнитель (размечает данные)
+    - reviewer: проверяющий качество разметки
+    - admin: администратор (полный доступ)
+    """
+
+    ROLE_CUSTOMER = "customer"      # Заказчик
+    ROLE_ANNOTATOR = "annotator"    # Исполнитель
+    ROLE_REVIEWER = "reviewer"      # Проверяющий
+    ROLE_ADMIN = "admin"            # Администратор
 
     ROLE_CHOICES = (
         (ROLE_CUSTOMER, "customer"),
@@ -36,70 +44,87 @@ class User(Document):
         (ROLE_ADMIN, "admin"),
     )
 
+    # Поля пользователя
     email = EmailField(required=True, unique=True)
     username = StringField(required=True, unique=True, max_length=150)
-    role = StringField(required=True, choices=[c[0] for c in ROLE_CHOICES], default=ROLE_CUSTOMER)
-
+    role = StringField(
+        required=True,
+        choices=[c[0] for c in ROLE_CHOICES],
+        default=ROLE_CUSTOMER
+    )
     password_hash = StringField(required=True)
     is_active = BooleanField(default=True)
 
-    full_name = StringField(default="", max_length=255)
-    specialization = StringField(default="", max_length=255)
-    group_name = StringField(default="", max_length=255)
-    experience_level = StringField(default="", max_length=120)
-    available_task_types = ListField(StringField(max_length=100), default=list)
-
+    # Рейтинг исполнителя (обновляется после QC-арбитража/метрик).
     rating = FloatField(default=0.0)
-    completed_assignments = IntField(default=0)
-    conflict_rate = FloatField(default=0.0)
+
+    # Баланс пользователя для выплат/расчетов (обновляется атомарными $inc в finance).
     balance = DecimalField(default=0, precision=20, rounding=None)
+
+    # Дополнительные поля для аннотаторов и ревьюеров
+    specialization = StringField(max_length=100, default="")
+    group_name = StringField(max_length=100, default="")      # устаревшее поле, оставлено для совместимости
+    groups = ListField(StringField(max_length=100), default=list)  # список групп/команд
+    experience_level = StringField(max_length=50, default="")
 
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
+    # Индексы для ускорения поиска и уникальности
     meta = {
         "collection": "users",
-        "strict": False,
         "indexes": [
             {"fields": ["email"], "unique": True},
             {"fields": ["username"], "unique": True},
             {"fields": ["role", "is_active"]},
-            "specialization",
-            "group_name",
-        ],
+            {"fields": ["groups"]},
+        ]
     }
 
-    @property
-    def is_authenticated(self):
-        """
-        Возвращает True для аутентифицированных пользователей.
-        Требуется для DRF authentication.
-        """
-        return True
-
-    @property
-    def is_anonymous(self):
-        """
-        Возвращает False для реальных пользователей.
-        Требуется для DRF authentication.
-        """
-        return False
-
     def save(self, *args, **kwargs):
+        """Сохранение пользователя с обновлением timestamp и логированием."""
         start_time = time.time()
+        logger.info(f"Начало сохранения пользователя: {self.email}")
         self.updated_at = datetime.utcnow()
         result = super().save(*args, **kwargs)
-        logger.info("Saved user %s in %.3fs", self.email, time.time() - start_time)
+        elapsed = round(time.time() - start_time, 3)
+        logger.info(f"Пользователь сохранен успешно: {self.id} (время: {elapsed} сек)")
         return result
 
     def set_password(self, raw_password: str) -> None:
-        rounds = getattr(settings, "BCRYPT_ROUNDS", 4)
+        """
+        Хеширование пароля с использованием bcrypt.
+        Для разработки: rounds=4 (быстро ~100ms), для production: rounds=12 (~300ms)
+        """
+        start_time = time.time()
+        logger.info(f"Начало хеширования пароля для: {self.email}")
+
+        rounds = getattr(settings, 'BCRYPT_ROUNDS', 4)
+        logger.info(f"BCRYPT_ROUNDS={rounds}")
+
         salt = bcrypt.gensalt(rounds=rounds)
-        self.password_hash = bcrypt.hashpw(raw_password.encode("utf-8"), salt).decode("utf-8")
+        self.password_hash = bcrypt.hashpw(
+            raw_password.encode('utf-8'),
+            salt
+        ).decode('utf-8')
+
+        total_time = round(time.time() - start_time, 3)
+        logger.info(f"Хеширование завершено за {total_time} сек (rounds={rounds})")
 
     def check_password(self, raw_password: str) -> bool:
+        """
+        Проверка пароля через bcrypt.
+        """
+        start_time = time.time()
+        logger.info(f"Начало проверки пароля для: {self.email}")
+
         try:
-            return bcrypt.checkpw(raw_password.encode("utf-8"), self.password_hash.encode("utf-8"))
-        except Exception:
-            logger.exception("Password validation failed for %s", self.email)
+            result = bcrypt.checkpw(
+                raw_password.encode('utf-8'),
+                self.password_hash.encode('utf-8')
+            )
+            logger.info(f"Проверка пароля: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при проверке пароля: {e}", exc_info=True)
             return False

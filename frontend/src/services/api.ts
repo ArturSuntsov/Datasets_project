@@ -328,6 +328,23 @@ export const workflowAPI = {
   },
 };
 
+// ------------------ Users API (массовое создание) ------------------
+export const usersAPI = {
+  async bulkCreateAnnotators(file: File, groups: string, specialization?: string, experienceLevel?: string): Promise<Blob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('groups', groups);
+    if (specialization) formData.append('specialization', specialization);
+    if (experienceLevel) formData.append('experience_level', experienceLevel);
+    
+    const res = await api.post<Blob>('/api/users/bulk-create-annotators/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+};
+
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));
 }

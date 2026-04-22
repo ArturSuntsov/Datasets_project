@@ -7,6 +7,10 @@ export interface User {
   role: Role;
   rating?: number;
   balance?: string;
+  specialization?: string;
+  group_name?: string;
+  groups?: string[];
+  experience_level?: string;
 }
 
 export type DatasetStatus = "draft" | "active" | "archived";

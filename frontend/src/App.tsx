@@ -19,6 +19,7 @@ import ProjectsPage from "./pages/ProjectsPage";
 import ProjectWorkflowPage from "./pages/ProjectWorkflowPage";
 
 import AnnotationPage from "./pages/AnnotationPage";
+import AnnotatorProjectPage from "./pages/AnnotatorProjectPage";
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -71,6 +72,16 @@ export default function App() {
           <RequireAuth>
             <Layout>
               <ProjectWorkflowPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/labeling/projects/:projectId"
+        element={
+          <RequireAuth>
+            <Layout>
+              <AnnotatorProjectPage />
             </Layout>
           </RequireAuth>
         }

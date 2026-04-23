@@ -80,6 +80,9 @@ export function QualityPage() {
                   <span className="badge badge-warning">agreement {item.agreement_score.toFixed(2)}</span>
                 </div>
                 <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">{item.annotations.length} submissions · F1 {Number(item.metrics.f1 || 0).toFixed(2)}</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Golden: {item.golden_total ?? 0} checks · errors {item.golden_errors ?? 0} · score {Number(item.golden_score ?? 0).toFixed(2)}
+                </div>
               </button>
             ))}
           </div>
@@ -94,6 +97,9 @@ export function QualityPage() {
             <div>
               <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{reviewDetailQuery.data.project_title}</div>
               <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Resolve review {reviewDetailQuery.data.review_id.slice(0, 8)}</h2>
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Golden checks: {reviewDetailQuery.data.golden_total ?? 0} · errors: {reviewDetailQuery.data.golden_errors ?? 0} · score: {Number(reviewDetailQuery.data.golden_score ?? 0).toFixed(2)}
+              </div>
             </div>
             <img src={reviewDetailQuery.data.frame_url} alt="Frame under review" className="max-h-[420px] rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

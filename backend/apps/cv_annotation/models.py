@@ -105,6 +105,10 @@ class WorkItem(Document):
     final_source = StringField(default="")
     review_required = BooleanField(default=False)
     review_status = StringField(default="none")
+    pre_annotations = DictField(default=dict)
+    pre_annotation_model = StringField(default="")
+    pre_annotation_confidence_threshold = FloatField(default=0.7)
+    video_qc = DictField(default=dict)
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
@@ -195,10 +199,52 @@ class ReviewRecord(Document):
     metrics = DictField(default=dict)
     dispute_reason = StringField(default="")
     resolution = DictField(default=dict)
+    golden_frame_ids = ListField(StringField(), default=list)
+    golden_total = IntField(default=0)
+    golden_errors = IntField(default=0)
+    golden_score = FloatField(default=0.0)
     created_at = DateTimeField(default=datetime.utcnow)
     resolved_at = DateTimeField(null=True)
 
     meta = {
         "collection": "cv_review_records",
         "indexes": ["project", "status", "reviewer"],
+    }
+
+
+class GoldenFrame(Document):
+    project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
+    frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
+    reference_annotation = DictField(required=True, default=dict)
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        "collection": "cv_golden_frames",
+        "indexes": ["project", "is_active"],
+    }
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.utcnow()
+        return super().save(*args, **kwargs)
+
+
+class SecurityEvent(Document):
+    EVENT_IMPORT_CLEANUP = "import_cleanup"
+    EVENT_PREANNOTATION = "preannotation"
+    EVENT_REVIEW_RESOLVE = "review_resolve"
+    EVENT_VIDEO_QC = "video_qc"
+    EVENT_ASSIGNMENT_DISTRIBUTION = "assignment_distribution"
+
+    project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
+    actor = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+    event_type = StringField(required=True)
+    severity = StringField(default="info")
+    payload = DictField(default=dict)
+    created_at = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        "collection": "cv_security_events",
+        "indexes": ["project", "event_type", "severity", "created_at"],
     }

@@ -26,12 +26,10 @@ export default function CreateProjectPage() {
   const [specialization, setSpecialization] = useState("");
   const [groupRule, setGroupRule] = useState("");
   const [selectedAnnotators, setSelectedAnnotators] = useState<string[]>([]);
-  const [selectedReviewers, setSelectedReviewers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const annotatorsQuery = useQuery({ queryKey: ["participants", "annotator"], queryFn: () => participantsAPI.list("annotator") });
-  const reviewersQuery = useQuery({ queryKey: ["participants", "reviewer"], queryFn: () => participantsAPI.list("reviewer") });
 
   const labelsPreview = useMemo(() => parseLabels(labelsInput), [labelsInput]);
 
@@ -57,7 +55,7 @@ export default function CreateProjectPage() {
           group: groupRule,
         },
         allowed_annotator_ids: selectedAnnotators,
-        allowed_reviewer_ids: selectedReviewers,
+        allowed_reviewer_ids: [],
         frame_interval_sec: Number(frameInterval) || 1,
         assignments_per_task: 2,
         agreement_threshold: Number(agreementThreshold) || 0.75,
@@ -108,7 +106,7 @@ export default function CreateProjectPage() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Create CV Project</h1>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Configure labels, upload rules, annotator pool, and reviewer pool for the first bbox workflow.
+          Configure labels, instructions, and annotator pool for the bbox workflow.
         </p>
       </div>
 
@@ -162,7 +160,7 @@ export default function CreateProjectPage() {
               </div>
             </div>
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-              Default QC is fixed for this release: 2 annotators per frame, reviewer only for conflicts, IoU threshold 0.5.
+              Default QC for this flow: 2 annotators per frame and automatic agreement check with IoU threshold 0.5.
             </div>
           </div>
         </div>
@@ -173,12 +171,6 @@ export default function CreateProjectPage() {
             items={annotatorsQuery.data?.items ?? []}
             selected={selectedAnnotators}
             onToggle={(id) => toggle(id, selectedAnnotators, setSelectedAnnotators)}
-          />
-          <ParticipantSelector
-            title="Reviewer pool"
-            items={reviewersQuery.data?.items ?? []}
-            selected={selectedReviewers}
-            onToggle={(id) => toggle(id, selectedReviewers, setSelectedReviewers)}
           />
         </div>
 

@@ -1,6 +1,8 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, isAxiosError } from "axios";
 import {
   AnnotateRequest,
+  AnnotatorProjectDetail,
+  AnnotatorProjectsResponse,
   Annotation,
   ApiErrorResponse,
   ApiListResponse,
@@ -26,6 +28,7 @@ import {
   ReviewQueueItem,
   ReviewResolveRequest,
   ReviewResolveResponse,
+  SecurityEventItem,
   Task,
   Transaction,
   TransferRequest,
@@ -145,6 +148,29 @@ export const projectsAPI = {
   async delete(id: string): Promise<void> {
     await api.delete(`/api/projects/${id}/`);
   },
+  async uploadInstructions(projectId: string, file: File): Promise<Pick<Project, "instructions_file_uri" | "instructions_file_name" | "instructions_version" | "instructions_updated_at">> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await api.post(`/api/projects/${projectId}/instructions/upload/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data as any;
+  },
+  async importParticipantsCsv(projectId: string, file: File): Promise<{ created_users: number; linked_memberships: number; skipped_rows: number }> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await api.post<{ created_users: number; linked_memberships: number; skipped_rows: number }>(`/api/projects/${projectId}/participants/import-csv/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+  async manualDistributeAssignments(projectId: string, annotatorIds: string[], maxItems = 50): Promise<{ work_items_considered: number; assignments_created: number }> {
+    const res = await api.post<{ work_items_considered: number; assignments_created: number }>(`/api/projects/${projectId}/assignments/manual-distribute/`, {
+      annotator_ids: annotatorIds,
+      max_items: maxItems,
+    });
+    return res.data;
+  },
 };
 
 export const workflowAPI = {
@@ -156,6 +182,7 @@ export const workflowAPI = {
     }
     const res = await api.post<ProjectImportResponse>(`/api/projects/${projectId}/imports/`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
+      timeout: 10 * 60 * 1000,
     });
     return res.data;
   },
@@ -167,8 +194,19 @@ export const workflowAPI = {
     const res = await api.get<ProjectOverview>(`/api/projects/${projectId}/overview/`);
     return res.data;
   },
-  async export(projectId: string): Promise<ProjectExportPayload> {
-    const res = await api.get<ProjectExportPayload>(`/api/projects/${projectId}/export/`);
+  async export(projectId: string, format: "coco" | "yolo" | "both" = "both"): Promise<ProjectExportPayload> {
+    const res = await api.get<ProjectExportPayload>(`/api/projects/${projectId}/export/`, { params: { format } });
+    return res.data;
+  },
+  async exportArchive(projectId: string, format: "coco" | "yolo" | "both" = "both"): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/`, {
+      params: { format, download: "1" },
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
+  async securityEvents(projectId: string): Promise<ApiListResponse<SecurityEventItem>> {
+    const res = await api.get<ApiListResponse<SecurityEventItem>>(`/api/projects/${projectId}/security-events/`);
     return res.data;
   },
 };
@@ -176,6 +214,18 @@ export const workflowAPI = {
 export const annotatorAPI = {
   async queue(): Promise<ApiListResponse<QueueItem>> {
     const res = await api.get<ApiListResponse<QueueItem>>("/api/annotator/queue/");
+    return res.data;
+  },
+  async projects(): Promise<AnnotatorProjectsResponse> {
+    const res = await api.get<AnnotatorProjectsResponse>("/api/annotator/projects/");
+    return res.data;
+  },
+  async projectDetail(projectId: string): Promise<AnnotatorProjectDetail> {
+    const res = await api.get<AnnotatorProjectDetail>(`/api/annotator/projects/${projectId}/`);
+    return res.data;
+  },
+  async nextProjectAssignment(projectId: string): Promise<{ assignment_id: string; source: string }> {
+    const res = await api.get<{ assignment_id: string; source: string }>(`/api/annotator/projects/${projectId}/next-assignment/`);
     return res.data;
   },
   async detail(assignmentId: string): Promise<AssignmentDetail> {

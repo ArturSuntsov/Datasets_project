@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import io
+import json
+import random
+import zipfile
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from mongoengine import Q
 
 from apps.projects.models import Project, ProjectMembership
 from apps.users.models import User
-from ..models import Assignment, FrameItem, ImportAsset, ImportSession, ReviewRecord, WorkAnnotation, WorkItem
+from ..models import Assignment, FrameItem, GoldenFrame, ImportAsset, ImportSession, ReviewRecord, WorkAnnotation, WorkItem, SecurityEvent
 from .frames import FrameExtractionError, extract_video_frames
-from .upload import image_dimensions
+from .preannotation import generate_preannotation_for_frame
+from .security import log_security_event
+from .upload import absolute_media_path, image_dimensions
+from .video_qc import build_video_qc_payload, interpolate_boxes
 
 
 def build_import_preview(import_session: ImportSession) -> dict:
@@ -24,6 +32,7 @@ def build_import_preview(import_session: ImportSession) -> dict:
         "frames_total": sum(asset.frame_count for asset in processed),
         "errors": [asset.error_message for asset in failed if asset.error_message],
         "sample_frames": [frame.frame_uri for frame in preview_frames],
+        "cleanup": import_session.summary.get("cleanup", {}) if isinstance(import_session.summary, dict) else {},
     }
 
 
@@ -49,30 +58,153 @@ def process_import_asset(asset: ImportAsset, interval_sec: float) -> ImportAsset
             for frame in extracted:
                 FrameItem(project=asset.project, asset=asset, **frame).save()
             asset.frame_count = len(extracted)
-            asset.metadata = {"frame_interval_sec": interval_sec}
+            asset.metadata = {
+                "frame_interval_sec": interval_sec,
+                "video_frames_extracted": len(extracted),
+            }
         asset.processing_status = ImportAsset.STATUS_PROCESSED
         asset.error_message = ""
+    except FrameExtractionError as exc:
+        asset.processing_status = ImportAsset.STATUS_FAILED
+        asset.error_message = f"Frame extraction failed: {exc}"
+        asset.frame_count = 0
+        asset.metadata = {"frame_interval_sec": interval_sec, "failed_stage": "frame_extraction"}
     except Exception as exc:
         asset.processing_status = ImportAsset.STATUS_FAILED
         asset.error_message = str(exc)
         asset.frame_count = 0
     asset.save()
+    cleanup = _cleanup_processed_asset(asset)
+    if cleanup:
+        asset.metadata = {**(asset.metadata or {}), "cleanup": cleanup}
+        asset.save()
     return asset
+
+
+def _file_sha256(file_uri: str) -> str:
+    path = absolute_media_path(file_uri)
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cleanup_processed_asset(asset: ImportAsset) -> dict:
+    removed_duplicates = 0
+    removed_invalid_frames = 0
+    duplicate_of_asset_id = ""
+    duplicate = (
+        ImportAsset.objects(
+            project=asset.project,
+            processing_status=ImportAsset.STATUS_PROCESSED,
+            id__ne=asset.id,
+            file_size=asset.file_size,
+            file_name=asset.file_name,
+        )
+        .first()
+    )
+    current_hash = ""
+    try:
+        current_hash = _file_sha256(asset.file_uri)
+    except Exception:
+        current_hash = ""
+    if duplicate:
+        duplicate_hash = duplicate.metadata.get("sha256", "")
+        if not duplicate_hash:
+            try:
+                duplicate_hash = _file_sha256(duplicate.file_uri)
+            except Exception:
+                duplicate_hash = ""
+        if current_hash and duplicate_hash and current_hash == duplicate_hash:
+            duplicate_of_asset_id = str(duplicate.id)
+            FrameItem.objects(project=asset.project, asset=asset).delete()
+            removed_duplicates = asset.frame_count
+            asset.processing_status = ImportAsset.STATUS_FAILED
+            asset.error_message = f"Duplicate asset detected (same content as {duplicate_of_asset_id})"
+            asset.frame_count = 0
+    valid_frames = []
+    for frame in FrameItem.objects(project=asset.project, asset=asset):
+        if frame.width <= 0 or frame.height <= 0:
+            frame.delete()
+            removed_invalid_frames += 1
+            continue
+        valid_frames.append(frame)
+    if asset.processing_status == ImportAsset.STATUS_PROCESSED:
+        asset.frame_count = len(valid_frames)
+    metadata = asset.metadata or {}
+    if current_hash:
+        metadata["sha256"] = current_hash
+    cleanup = {
+        "removed_duplicates": removed_duplicates,
+        "removed_invalid_frames": removed_invalid_frames,
+        "duplicate_of_asset_id": duplicate_of_asset_id,
+    }
+    metadata["cleanup"] = cleanup
+    asset.metadata = metadata
+    asset.save()
+    if removed_duplicates or removed_invalid_frames:
+        log_security_event(
+            project=asset.project,
+            event_type=SecurityEvent.EVENT_IMPORT_CLEANUP,
+            payload={"asset_id": str(asset.id), **cleanup},
+            severity="warning" if removed_duplicates else "info",
+        )
+    return cleanup
 
 
 def select_annotators_for_project(project: Project, limit: int) -> List[User]:
     membership_qs = ProjectMembership.objects(project=project, role=ProjectMembership.ROLE_ANNOTATOR, is_active=True)
     memberships = list(membership_qs)
-    if not memberships:
+    allowed_ids = {str(user.id) for user in (project.allowed_annotators or [])}
+    rules = project.participant_rules or {}
+    assignment_scope = str(rules.get("assignment_scope") or "selected_only").strip().lower()
+    required_specialization = str(rules.get("specialization") or "").strip().lower()
+    required_group = str(rules.get("group") or "").strip().lower()
+
+    if allowed_ids and assignment_scope != "all":
+        memberships = [membership for membership in memberships if str(membership.user.id) in allowed_ids]
+
+    if not memberships and allowed_ids:
+        allowed_users = list(User.objects(id__in=list(allowed_ids), role=User.ROLE_ANNOTATOR, is_active=True))
+        memberships = []
+        for user in allowed_users:
+            membership = ProjectMembership.objects(
+                project=project,
+                user=user,
+                role=ProjectMembership.ROLE_ANNOTATOR,
+            ).first()
+            if not membership:
+                membership = ProjectMembership(
+                    project=project,
+                    user=user,
+                    role=ProjectMembership.ROLE_ANNOTATOR,
+                )
+            membership.is_active = True
+            membership.specialization = user.specialization
+            membership.group_name = user.group_name
+            membership.save()
+            memberships.append(membership)
+
+    if not memberships and assignment_scope == "all":
         fallback = list(User.objects(role=User.ROLE_ANNOTATOR, is_active=True))
         memberships = [
-            ProjectMembership(project=project, user=user, role=ProjectMembership.ROLE_ANNOTATOR, is_active=True, specialization=user.specialization, group_name=user.group_name)
+            ProjectMembership(
+                project=project,
+                user=user,
+                role=ProjectMembership.ROLE_ANNOTATOR,
+                is_active=True,
+                specialization=user.specialization,
+                group_name=user.group_name,
+            )
             for user in fallback
         ]
 
-    rules = project.participant_rules or {}
-    required_specialization = (rules.get("specialization") or "").strip().lower()
-    required_group = (rules.get("group") or "").strip().lower()
+    if required_group and assignment_scope == "group_only":
+        memberships = [membership for membership in memberships if membership.group_name.lower() == required_group]
+
+    if assignment_scope == "selected_only" and allowed_ids:
+        memberships = [membership for membership in memberships if str(membership.user.id) in allowed_ids]
 
     def open_load(user: User) -> int:
         return Assignment.objects(
@@ -115,6 +247,19 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
             work_item = WorkItem.objects(project=project, frame=frame).first()
             if not work_item:
                 work_item = WorkItem(project=project, frame=frame)
+                ai_enabled = bool((project.participant_rules or {}).get("ai_prelabel_enabled", True))
+                if ai_enabled:
+                    model_name = str((project.participant_rules or {}).get("ai_model") or "baseline-box-v1")
+                    confidence_threshold = float((project.participant_rules or {}).get("ai_confidence_threshold") or 0.7)
+                    preannotation = generate_preannotation_for_frame(frame, model_name=model_name, confidence_threshold=confidence_threshold)
+                    work_item.pre_annotations = preannotation
+                    work_item.pre_annotation_model = model_name
+                    work_item.pre_annotation_confidence_threshold = confidence_threshold
+                    log_security_event(
+                        project=project,
+                        event_type=SecurityEvent.EVENT_PREANNOTATION,
+                        payload={"frame_id": str(frame.id), "model": model_name, "threshold": confidence_threshold, "boxes": len(preannotation.get("boxes", []))},
+                    )
                 work_item.save()
                 created_work_items += 1
             selected_annotators = select_annotators_for_project(project, project.assignments_per_task)
@@ -132,15 +277,26 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
                 )
                 assignment.save()
                 created_assignments += 1
+                log_security_event(
+                    project=project,
+                    event_type=SecurityEvent.EVENT_ASSIGNMENT_DISTRIBUTION,
+                    payload={"work_item_id": str(work_item.id), "annotator_id": str(annotator.id)},
+                )
                 next_order += 1
             frame_ids.append(str(frame.id))
 
     preview = build_import_preview(import_session)
     import_session.preview = preview
+    cleanup_summary = {
+        "duplicates_removed": sum(int((asset.metadata or {}).get("cleanup", {}).get("removed_duplicates", 0)) for asset in processed_assets),
+        "invalid_frames_removed": sum(int((asset.metadata or {}).get("cleanup", {}).get("removed_invalid_frames", 0)) for asset in processed_assets),
+        "duplicate_assets": [str(asset.id) for asset in ImportAsset.objects(import_session=import_session, processing_status=ImportAsset.STATUS_FAILED) if "Duplicate asset" in (asset.error_message or "")],
+    }
     import_session.summary = {
         "work_items_created": created_work_items,
         "assignments_created": created_assignments,
         "frame_ids": frame_ids,
+        "cleanup": cleanup_summary,
     }
     import_session.status = ImportSession.STATUS_FINALIZED if created_work_items or processed_assets else ImportSession.STATUS_FAILED
     import_session.save()
@@ -253,13 +409,21 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
     if len(annotations) < work_item.project.assignments_per_task:
         return None
 
-    comparison = compare_bbox_annotations(
-        annotations[0].label_data,
-        annotations[1].label_data,
-        work_item.project.iou_threshold,
-    )
-    work_item.agreement_score = comparison["f1"]
-    if comparison["f1"] >= work_item.project.agreement_threshold:
+    pair_scores: List[float] = []
+    pair_metrics: List[dict] = []
+    for i, annotation_a in enumerate(annotations):
+        for j in range(i + 1, len(annotations)):
+            annotation_b = annotations[j]
+            comparison = compare_bbox_annotations(
+                annotation_a.label_data,
+                annotation_b.label_data,
+                work_item.project.iou_threshold,
+            )
+            pair_scores.append(comparison["f1"])
+            pair_metrics.append({"a": str(annotation_a.id), "b": str(annotation_b.id), "metrics": comparison})
+    consensus_f1 = round(sum(pair_scores) / len(pair_scores), 4) if pair_scores else 0.0
+    work_item.agreement_score = consensus_f1
+    if consensus_f1 >= work_item.project.agreement_threshold:
         work_item.status = WorkItem.STATUS_COMPLETED
         work_item.review_required = False
         work_item.review_status = "auto_accepted"
@@ -272,16 +436,19 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
             annotation.save()
             annotation.assignment.status = Assignment.STATUS_ACCEPTED
             annotation.assignment.save()
-            update_user_quality(annotation.annotator, comparison["f1"], disputed=False)
-        return {"state": "accepted", "metrics": comparison}
+            update_user_quality(annotation.annotator, consensus_f1, disputed=False)
+        _run_video_qc_for_work_item(work_item)
+        return {"state": "accepted", "metrics": {"f1": consensus_f1, "pairs": pair_metrics}}
 
     review = ReviewRecord.objects(work_item=work_item).first()
     if not review:
         review = ReviewRecord(project=work_item.project, work_item=work_item)
     review.status = ReviewRecord.STATUS_PENDING
-    review.agreement_score = comparison["f1"]
-    review.metrics = comparison
+    review.agreement_score = consensus_f1
+    review.metrics = {"f1": consensus_f1, "pairs": pair_metrics}
     review.dispute_reason = "Low agreement between annotators"
+    golden = list(GoldenFrame.objects(project=work_item.project, is_active=True).limit(10))
+    review.golden_frame_ids = [str(item.id) for item in golden]
     review.save()
 
     work_item.status = WorkItem.STATUS_IN_REVIEW
@@ -292,8 +459,8 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
     for annotation in annotations:
         annotation.assignment.status = Assignment.STATUS_SUBMITTED
         annotation.assignment.save()
-        update_user_quality(annotation.annotator, comparison["f1"], disputed=True)
-    return {"state": "review", "metrics": comparison, "review_id": str(review.id)}
+        update_user_quality(annotation.annotator, consensus_f1, disputed=True)
+    return {"state": "review", "metrics": {"f1": consensus_f1, "pairs": pair_metrics}, "review_id": str(review.id)}
 
 
 def save_assignment_annotation(assignment: Assignment, label_data: dict, comment: str, is_final: bool) -> Tuple[WorkAnnotation, Optional[dict]]:
@@ -325,9 +492,29 @@ def save_assignment_annotation(assignment: Assignment, label_data: dict, comment
 
 
 def resolve_review(review: ReviewRecord, reviewer: User, resolution: dict) -> dict:
+    golden_score = _evaluate_golden_answers(review, resolution)
+    if golden_score["golden_total"] > 0 and golden_score["golden_errors"] / golden_score["golden_total"] > 0.2:
+        review.golden_total = golden_score["golden_total"]
+        review.golden_errors = golden_score["golden_errors"]
+        review.golden_score = golden_score["golden_score"]
+        review.metrics = {**(review.metrics or {}), "golden": golden_score}
+        review.save()
+        log_security_event(
+            project=review.project,
+            actor=reviewer,
+            event_type=SecurityEvent.EVENT_REVIEW_RESOLVE,
+            payload={"review_id": str(review.id), "golden": golden_score, "rejected": True},
+            severity="warning",
+        )
+        return {"review_id": str(review.id), "work_item_id": str(review.work_item.id), "status": "rejected_by_golden"}
+
     review.reviewer = reviewer
     review.status = ReviewRecord.STATUS_RESOLVED
     review.resolution = resolution
+    review.golden_total = golden_score["golden_total"]
+    review.golden_errors = golden_score["golden_errors"]
+    review.golden_score = golden_score["golden_score"]
+    review.metrics = {**(review.metrics or {}), "golden": golden_score}
     review.resolved_at = datetime.utcnow()
     review.save()
 
@@ -338,6 +525,7 @@ def resolve_review(review: ReviewRecord, reviewer: User, resolution: dict) -> di
     work_item.final_annotation = resolution
     work_item.final_source = "reviewer"
     work_item.save()
+    _run_video_qc_for_work_item(work_item)
 
     annotations = list(WorkAnnotation.objects(work_item=work_item, status__in=[WorkAnnotation.STATUS_SUBMITTED, WorkAnnotation.STATUS_ACCEPTED]))
     for annotation in annotations:
@@ -347,7 +535,57 @@ def resolve_review(review: ReviewRecord, reviewer: User, resolution: dict) -> di
         annotation.assignment.status = Assignment.STATUS_ACCEPTED if annotation.status == WorkAnnotation.STATUS_ACCEPTED else Assignment.STATUS_REJECTED
         annotation.assignment.save()
         update_user_quality(annotation.annotator, score, disputed=True)
+    log_security_event(
+        project=review.project,
+        actor=reviewer,
+        event_type=SecurityEvent.EVENT_REVIEW_RESOLVE,
+        payload={"review_id": str(review.id), "golden": golden_score, "resolved": True},
+    )
     return {"review_id": str(review.id), "work_item_id": str(work_item.id), "status": review.status}
+
+
+def _evaluate_golden_answers(review: ReviewRecord, resolution: dict) -> dict:
+    golden_ids = review.golden_frame_ids or []
+    if not golden_ids:
+        return {"golden_total": 0, "golden_errors": 0, "golden_score": 1.0}
+    golden_frames = list(GoldenFrame.objects(id__in=golden_ids, is_active=True))
+    total = len(golden_frames)
+    if total == 0:
+        return {"golden_total": 0, "golden_errors": 0, "golden_score": 1.0}
+    # Simplified validation: reviewer resolution should align with golden references on average.
+    scores = [
+        compare_bbox_annotations(golden.reference_annotation, resolution, review.project.iou_threshold)["f1"]
+        for golden in golden_frames
+    ]
+    errors = sum(1 for score in scores if score < 0.8)
+    passed = total - errors
+    return {"golden_total": total, "golden_errors": errors, "golden_score": round(passed / total, 4)}
+
+
+def _run_video_qc_for_work_item(work_item: WorkItem) -> None:
+    current_frame = work_item.frame
+    previous_frame = (
+        FrameItem.objects(asset=current_frame.asset, frame_number__lt=current_frame.frame_number)
+        .order_by("-frame_number")
+        .first()
+    )
+    previous_item = WorkItem.objects(project=work_item.project, frame=previous_frame, status=WorkItem.STATUS_COMPLETED).first() if previous_frame else None
+    payload = build_video_qc_payload(work_item, previous_item, iou_threshold=0.3)
+    if payload.get("checked") and payload.get("flag_for_review"):
+        payload["interpolation_candidate"] = interpolate_boxes(
+            _normalize_boxes(previous_item.final_annotation) if previous_item else [],
+            _normalize_boxes(work_item.final_annotation),
+            alpha=0.5,
+        )
+    work_item.video_qc = payload
+    work_item.save()
+    if payload.get("checked"):
+        log_security_event(
+            project=work_item.project,
+            event_type=SecurityEvent.EVENT_VIDEO_QC,
+            payload={"work_item_id": str(work_item.id), **payload},
+            severity="warning" if payload.get("flag_for_review") else "info",
+        )
 
 
 def project_overview(project: Project) -> dict:
@@ -406,12 +644,40 @@ def project_overview(project: Project) -> dict:
         "reviews": {
             "pending": sum(1 for review in reviews if review.status == ReviewRecord.STATUS_PENDING),
             "resolved": sum(1 for review in reviews if review.status == ReviewRecord.STATUS_RESOLVED),
+            "golden_average": round(sum(float(review.golden_score or 0.0) for review in reviews) / len(reviews), 4) if reviews else 0.0,
         },
         "annotators": annotator_stats,
     }
 
 
-def build_coco_export(project: Project) -> dict:
+def _quality_report(project: Project, work_items: List[WorkItem], assignments: List[Assignment], reviews: List[ReviewRecord]) -> dict:
+    completed = [item for item in work_items if item.status == WorkItem.STATUS_COMPLETED]
+    pending_review = [item for item in work_items if item.status == WorkItem.STATUS_IN_REVIEW]
+    rejected = [item for item in work_items if item.review_required and item.status != WorkItem.STATUS_COMPLETED]
+    agreement_values = [item.agreement_score for item in completed if item.agreement_score is not None]
+    total = len(work_items)
+    return {
+        "project_id": str(project.id),
+        "work_items_total": total,
+        "work_items_completed": len(completed),
+        "work_items_in_review": len(pending_review),
+        "work_items_rejected_or_flagged": len(rejected),
+        "completion_rate": round((len(completed) / total), 4) if total else 0.0,
+        "average_agreement": round(sum(agreement_values) / len(agreement_values), 4) if agreement_values else 0.0,
+        "assignments": {
+            "total": len(assignments),
+            "accepted": sum(1 for item in assignments if item.status == Assignment.STATUS_ACCEPTED),
+            "rejected": sum(1 for item in assignments if item.status == Assignment.STATUS_REJECTED),
+            "submitted": sum(1 for item in assignments if item.status == Assignment.STATUS_SUBMITTED),
+        },
+        "reviews": {
+            "pending": sum(1 for review in reviews if review.status == ReviewRecord.STATUS_PENDING),
+            "resolved": sum(1 for review in reviews if review.status == ReviewRecord.STATUS_RESOLVED),
+        },
+    }
+
+
+def _build_coco_export(project: Project, completed_items: List[WorkItem]) -> dict:
     categories = []
     category_lookup = {}
     for index, label in enumerate(project.label_schema or [], start=1):
@@ -423,7 +689,7 @@ def build_coco_export(project: Project) -> dict:
     annotations = []
     manifest_items = []
     annotation_id = 1
-    for work_item in WorkItem.objects(project=project, status=WorkItem.STATUS_COMPLETED):
+    for work_item in completed_items:
         frame = work_item.frame
         image_id = str(frame.id)
         images.append(
@@ -464,16 +730,99 @@ def build_coco_export(project: Project) -> dict:
                 "final_source": work_item.final_source,
             }
         )
+    return {"manifest": manifest_items, "coco": {"images": images, "annotations": annotations, "categories": categories}}
+
+
+def _build_yolo_export(project: Project, completed_items: List[WorkItem]) -> dict:
+    category_lookup: Dict[str, int] = {}
+    for index, label in enumerate(project.label_schema or []):
+        name = str(label.get("name") or label.get("label") or f"label_{index}").strip()
+        if name and name not in category_lookup:
+            category_lookup[name] = len(category_lookup)
+    labels_txt = [name for name, _idx in sorted(category_lookup.items(), key=lambda item: item[1])]
+    records: List[dict] = []
+    for work_item in completed_items:
+        frame = work_item.frame
+        image_width = max(float(frame.width or 0), 1.0)
+        image_height = max(float(frame.height or 0), 1.0)
+        yolo_lines: List[str] = []
+        for box in _normalize_boxes(work_item.final_annotation):
+            label = box["label"]
+            if label not in category_lookup:
+                category_lookup[label] = len(category_lookup)
+                labels_txt.append(label)
+            class_id = category_lookup[label]
+            x_center = (box["x"] + box["width"] / 2.0) / image_width
+            y_center = (box["y"] + box["height"] / 2.0) / image_height
+            width = box["width"] / image_width
+            height = box["height"] / image_height
+            yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
+        records.append(
+            {
+                "frame_uri": frame.frame_uri,
+                "label_file": f"labels/{str(frame.id)}.txt",
+                "lines": yolo_lines,
+            }
+        )
     return {
+        "labels": labels_txt,
+        "data_yaml": {
+            "path": f"project_{project.id}",
+            "train": "images/train",
+            "val": "images/val",
+            "names": labels_txt,
+        },
+        "records": records,
+    }
+
+
+def build_dataset_export(project: Project, export_format: str = "both") -> dict:
+    completed_items = list(WorkItem.objects(project=project, status=WorkItem.STATUS_COMPLETED))
+    assignments = list(Assignment.objects(project=project))
+    reviews = list(ReviewRecord.objects(project=project))
+    payload = {
         "project": {
             "id": str(project.id),
             "title": project.title,
             "annotation_type": project.annotation_type,
+            "export_format": export_format,
         },
-        "manifest": manifest_items,
-        "coco": {
-            "images": images,
-            "annotations": annotations,
-            "categories": categories,
-        },
+        "quality_report": _quality_report(project, completed_items, assignments, reviews),
     }
+    if export_format in {"coco", "both"}:
+        payload.update(_build_coco_export(project, completed_items))
+    if export_format in {"yolo", "both"}:
+        payload["yolo"] = _build_yolo_export(project, completed_items)
+    return payload
+
+
+def build_dataset_export_archive(project: Project, export_format: str = "both") -> tuple[str, bytes]:
+    payload = build_dataset_export(project, export_format=export_format)
+    archive_stream = io.BytesIO()
+    with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        quality_report = payload.get("quality_report", {})
+        bundle.writestr("quality_report.json", json.dumps(quality_report, ensure_ascii=False, indent=2))
+        if "coco" in payload:
+            bundle.writestr("annotations/coco.json", json.dumps(payload["coco"], ensure_ascii=False, indent=2))
+        if "yolo" in payload:
+            yolo = payload["yolo"]
+            bundle.writestr("annotations/yolo/data.yaml", json.dumps(yolo.get("data_yaml", {}), ensure_ascii=False, indent=2))
+            for record in yolo.get("records", []):
+                bundle.writestr(f"annotations/yolo/{record['label_file']}", "\n".join(record.get("lines", [])))
+        for item in payload.get("manifest", []):
+            frame_uri = item.get("frame_uri")
+            if not frame_uri:
+                continue
+            try:
+                path = absolute_media_path(frame_uri)
+                with open(path, "rb") as source:
+                    target_name = f"images/train/{path.name}"
+                    bundle.writestr(target_name, source.read())
+            except Exception:
+                continue
+    archive_name = f"project_{project.id}_{export_format}.zip"
+    return archive_name, archive_stream.getvalue()
+
+
+def build_coco_export(project: Project) -> dict:
+    return build_dataset_export(project, export_format="coco")

@@ -1,10 +1,7 @@
 import { create } from "zustand";
 import { AuthResponse, LoginRequest, RegisterRequest, User } from "../types";
 import { authAPI, clearTokens, getAccessToken, getRefreshToken, setTokens } from "../services/api";
-import { QueryClient } from "@tanstack/react-query";
-
-// Создаём queryClient для очистки
-const queryClient = new QueryClient();
+import { queryClient } from "../queryClient";
 
 type AuthState = {
   user: User | null;
@@ -28,68 +25,72 @@ export const useAuthStore = create<AuthState>((set) => ({
   error: null,
   login: async (body) => {
     set({ loading: true, error: null });
+    queryClient.clear();
     const res: AuthResponse = await authAPI.login(body);
     setTokens(res.access, res.refresh ?? getRefreshToken());
-    set({ 
-      user: res.user, 
-      accessToken: res.access, 
-      refreshToken: res.refresh ?? getRefreshToken(), 
-      isAuthenticated: true, 
-      loading: false 
+    queryClient.clear();
+    set({
+      user: res.user ?? null,
+      accessToken: res.access,
+      refreshToken: res.refresh ?? getRefreshToken(),
+      isAuthenticated: true,
+      loading: false,
     });
   },
   register: async (body) => {
     set({ loading: true, error: null });
     try {
       const res: AuthResponse = await authAPI.register(body);
-      const user: User = res.user ?? { 
-        id: (res as any).user_id ?? '', 
-        email: (res as any).email ?? body.email, 
-        username: (res as any).username ?? body.username, 
-        role: (res as any).role ?? body.role ?? 'customer' 
+      const user: User = res.user ?? {
+        id: (res as any).user_id ?? "",
+        email: (res as any).email ?? body.email,
+        username: (res as any).username ?? body.username,
+        role: (res as any).role ?? body.role ?? "customer",
       };
       if (res.access) {
         setTokens(res.access, res.refresh ?? getRefreshToken());
       }
-      set({ 
-        user, 
-        accessToken: res.access ?? getAccessToken(), 
-        refreshToken: res.refresh ?? getRefreshToken(), 
-        isAuthenticated: true, 
-        loading: false, 
-        error: null 
+      queryClient.clear();
+      set({
+        user,
+        accessToken: res.access ?? getAccessToken(),
+        refreshToken: res.refresh ?? getRefreshToken(),
+        isAuthenticated: true,
+        loading: false,
+        error: null,
       });
     } catch (e) {
-      set({ loading: false, error: e instanceof Error ? e.message : 'Ошибка регистрации' });
+      set({ loading: false, error: e instanceof Error ? e.message : "Registration failed" });
       throw e;
     }
   },
   logout: () => {
     clearTokens();
-    // ✅ ОЧИЩАЕМ ВЕСЬ КЭШ React Query при выходе
     queryClient.clear();
-    set({ 
-      user: null, 
-      accessToken: null, 
-      refreshToken: null, 
-      isAuthenticated: false, 
-      error: null 
+    set({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      isAuthenticated: false,
+      error: null,
     });
   },
   loadMe: async () => {
     set({ loading: true, error: null });
     try {
       const user = await authAPI.me();
+      queryClient.clear();
       set({ user, isAuthenticated: true, loading: false });
     } catch (e) {
       clearTokens();
-      set({ 
-        user: null, 
-        accessToken: null, 
-        refreshToken: null, 
-        isAuthenticated: false, 
-        loading: false, 
-        error: e instanceof Error ? e.message : "Failed to load me" 
+      queryClient.clear();
+      set({
+        user: null,
+        accessToken: null,
+        refreshToken: null,
+        isAuthenticated: false,
+        loading: false,
+        error: e instanceof Error ? e.message : "Failed to load me",
       });
     }
   },

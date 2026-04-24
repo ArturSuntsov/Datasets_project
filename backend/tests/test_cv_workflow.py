@@ -73,7 +73,7 @@ class TestUnifiedCvWorkflow:
         assert len(queue.data["items"]) == 1
         assert queue.data["items"][0]["project_id"] == project_id
 
-    def test_conflict_goes_to_reviewer_and_can_be_resolved(self, client, auth_headers, auth_headers_reviewer, user_annotator, user_reviewer):
+    def test_conflict_is_requeued_without_reviewer(self, client, auth_headers, user_annotator, user_reviewer):
         from apps.users.models import User
 
         second_annotator = User(email="annotator2@example.com", username="annotator_two", role=User.ROLE_ANNOTATOR)
@@ -125,26 +125,18 @@ class TestUnifiedCvWorkflow:
             format="json",
         )
         assert submit_two.status_code == 200
-        assert submit_two.data["evaluation"]["state"] == "review"
+        assert submit_two.data["evaluation"]["state"] == "requeued"
 
-        reviewer_queue = client.get("/api/reviewer/queue/", **auth_headers_reviewer)
-        assert reviewer_queue.status_code == 200
-        assert len(reviewer_queue.data["items"]) == 1
-        review_id = reviewer_queue.data["items"][0]["review_id"]
+        work_item = WorkItem.objects.get(project=Project.objects.get(id=project_id))
+        work_item.reload()
+        assert work_item.status == WorkItem.STATUS_PENDING
+        assert work_item.review_required is False
+        assert work_item.review_status == "requeued_low_agreement"
 
-        resolve = client.post(
-            f"/api/reviews/{review_id}/resolve/",
-            {"resolution": {"boxes": [{"x": 12, "y": 12, "width": 22, "height": 22, "label": "drone"}]}},
-            **auth_headers_reviewer,
-            format="json",
-        )
-        assert resolve.status_code == 200
-
-        review = ReviewRecord.objects.get(id=review_id)
-        work_item = WorkItem.objects.get(id=review.work_item.id)
-        assert review.status == ReviewRecord.STATUS_RESOLVED
-        assert work_item.status == WorkItem.STATUS_COMPLETED
-        assert work_item.final_source == "reviewer"
+        assignments = list(Assignment.objects(work_item=work_item))
+        assert len(assignments) >= 2
+        assert Assignment.objects(work_item=work_item, status=Assignment.STATUS_ASSIGNED).count() >= 1
+        assert WorkAnnotation.objects(work_item=work_item, status=WorkAnnotation.STATUS_REJECTED).count() == 2
 
     def test_finalize_only_assigns_allowed_annotators(self, client, auth_headers, user_annotator):
         from apps.users.models import User
@@ -339,6 +331,9 @@ class TestUnifiedCvWorkflow:
         project = Project.objects.get(id=project_id)
         assert Assignment.objects(project=project, annotator=user_annotator).count() == 25
         assert Assignment.objects(project=project, annotator=second_annotator).count() == 25
+        assert finalize_resp.data["summary"]["workflow_batches_total"] == 3
+        assert finalize_resp.data["summary"]["workflow_settings"]["task_batch_size"] == 10
+        assert finalize_resp.data["summary"]["workflow_settings"]["min_sequence_size"] == 3
 
         def submit_next(annotator, x_offset):
             next_resp = client.get(
@@ -352,6 +347,8 @@ class TestUnifiedCvWorkflow:
                 HTTP_AUTHORIZATION=f"Bearer {create_access_token(annotator)}",
             )
             assert detail_resp.status_code == 200
+            assert detail_resp.data["workflow_meta"]["task_batch_size"] in [10, 5]
+            assert detail_resp.data["workflow_meta"]["min_sequence_size"] == 3
             submit_resp = client.post(
                 f"/api/annotator/assignments/{assignment_id}/submit/",
                 {"label_data": {"boxes": [{"x": 10 + x_offset, "y": 10, "width": 20, "height": 20, "label": "drone"}]}, "is_final": True},
@@ -385,3 +382,48 @@ class TestUnifiedCvWorkflow:
         ).count()
         assert open_assignments == 15
         assert submitted_assignments == 10
+
+    def test_completed_project_stays_visible_in_completed_bucket(self, client, auth_headers, user_annotator):
+        project_resp = client.post(
+            "/api/projects/",
+            {
+                "title": "Completed bucket project",
+                "project_type": "cv",
+                "annotation_type": "bbox",
+                "instructions": "Should remain visible after the last task",
+                "label_schema": [{"name": "drone"}],
+                "allowed_annotator_ids": [str(user_annotator.id)],
+                "assignments_per_task": 1,
+            },
+            **auth_headers,
+            format="json",
+        )
+        project_id = project_resp.data["id"]
+
+        upload_resp = client.post(f"/api/projects/{project_id}/imports/", {"file": make_test_image("completed-bucket.png")}, **auth_headers)
+        assert upload_resp.status_code == 201
+        client.post(f"/api/projects/{project_id}/imports/{upload_resp.data['import_id']}/finalize/", {}, **auth_headers, format="json")
+
+        next_resp = client.get(
+            f"/api/annotator/projects/{project_id}/next-assignment/",
+            HTTP_AUTHORIZATION=f"Bearer {create_access_token(user_annotator)}",
+        )
+        assert next_resp.status_code == 200
+
+        submit_resp = client.post(
+            f"/api/annotator/assignments/{next_resp.data['assignment_id']}/submit/",
+            {"label_data": {"boxes": [{"x": 10, "y": 10, "width": 20, "height": 20, "label": "drone"}]}, "is_final": True},
+            HTTP_AUTHORIZATION=f"Bearer {create_access_token(user_annotator)}",
+            format="json",
+        )
+        assert submit_resp.status_code == 200
+
+        projects_resp = client.get(
+            "/api/annotator/projects/",
+            HTTP_AUTHORIZATION=f"Bearer {create_access_token(user_annotator)}",
+        )
+        assert projects_resp.status_code == 200
+        assert projects_resp.data["available_projects"] == []
+        assert projects_resp.data["active_projects"] == []
+        assert len(projects_resp.data["completed_projects"]) == 1
+        assert projects_resp.data["completed_projects"][0]["project_id"] == project_id

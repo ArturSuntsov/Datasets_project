@@ -5,7 +5,7 @@ import { annotatorAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
 
-type ProjectTab = "available" | "active";
+type ProjectTab = "available" | "active" | "completed";
 
 export function LabelingPage() {
   const user = useAuthStore((s) => s.user);
@@ -20,48 +20,58 @@ export function LabelingPage() {
   if (user?.role !== "annotator" && user?.role !== "admin") {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Annotation Projects</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">This workspace is available to annotators and admins.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Проекты разметки</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Этот раздел доступен исполнителям и администраторам.</p>
       </div>
     );
   }
 
   const availableProjects = projectsQuery.data?.available_projects ?? [];
   const activeProjects = projectsQuery.data?.active_projects ?? [];
-  const visibleProjects = tab === "available" ? availableProjects : activeProjects;
+  const completedProjects = projectsQuery.data?.completed_projects ?? [];
+  const visibleProjects =
+    tab === "available" ? availableProjects : tab === "active" ? activeProjects : completedProjects;
 
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Project Annotation Flow</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Проекты для разметки</h1>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-          First open a project, review its instructions, and then work through your frames sequentially.
+          Откройте проект, изучите инструкции и затем последовательно проходите свои кадры.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Available projects</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">Доступные проекты</div>
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{availableProjects.length}</div>
         </div>
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Active projects</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">Активные проекты</div>
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{activeProjects.length}</div>
         </div>
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Assignments in queue</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">Заданий в очереди</div>
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">
-            {availableProjects.reduce((sum, item) => sum + item.available_count, 0) + activeProjects.reduce((sum, item) => sum + item.active_count, 0)}
+            {availableProjects.reduce((sum, item) => sum + item.available_count, 0) +
+              activeProjects.reduce((sum, item) => sum + item.active_count, 0)}
           </div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Завершенные проекты</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{completedProjects.length}</div>
         </div>
       </div>
 
       <div className="flex gap-2">
         <button type="button" className={`btn-secondary ${tab === "available" ? "ring-2 ring-blue-400" : ""}`} onClick={() => setTab("available")}>
-          Available Projects
+          Доступные
         </button>
         <button type="button" className={`btn-secondary ${tab === "active" ? "ring-2 ring-blue-400" : ""}`} onClick={() => setTab("active")}>
-          Active Projects
+          Активные
+        </button>
+        <button type="button" className={`btn-secondary ${tab === "completed" ? "ring-2 ring-blue-400" : ""}`} onClick={() => setTab("completed")}>
+          Завершенные
         </button>
       </div>
 
@@ -71,20 +81,24 @@ export function LabelingPage() {
         </div>
       ) : projectsQuery.isError ? (
         <div className="card p-10 text-center">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Could not load projects</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Не удалось загрузить проекты</h2>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {(projectsQuery.error as any)?.response?.data?.detail || (projectsQuery.error as Error)?.message || "Check backend availability and try again."}
+            {(projectsQuery.error as any)?.response?.data?.detail || (projectsQuery.error as Error)?.message || "Проверьте доступность backend и попробуйте еще раз."}
           </p>
         </div>
       ) : visibleProjects.length === 0 ? (
         <div className="card p-10 text-center">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">No projects in this tab</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">В этой вкладке пока пусто</h2>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {tab === "available" ? "Projects with new assignments will appear here." : "Projects with started work will appear here."}
+            {tab === "available"
+              ? "Здесь появятся проекты с новыми заданиями."
+              : tab === "active"
+                ? "Здесь будут проекты, по которым уже начата работа."
+                : "Завершенные проекты остаются здесь, чтобы не исчезать после последнего задания."}
           </p>
           {tab === "available" ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              If a customer just uploaded media, they still need to click <span className="font-medium">Finalize import</span> before projects and assignments become visible here.
+              Если заказчик только что загрузил медиа, ему еще нужно нажать <span className="font-medium">Finalize import</span>, чтобы проект и задания появились здесь.
             </p>
           ) : null}
         </div>
@@ -97,23 +111,30 @@ export function LabelingPage() {
                   <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{project.project_status}</div>
                   <h2 className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{project.project_title}</h2>
                 </div>
-                <span className="badge badge-warning">{tab === "active" ? `${project.active_count} active` : `${project.available_count} available`}</span>
+                <span className="badge badge-warning">
+                  {tab === "active"
+                    ? `${project.active_count} в работе`
+                    : tab === "completed"
+                      ? `${project.completed_count ?? project.accepted_count + project.rejected_count} завершено`
+                      : `${project.available_count} доступно`}
+                </span>
               </div>
 
               <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-3">
-                {project.instructions || "No project instructions yet."}
+                {project.instructions || "Инструкция проекта пока не заполнена."}
               </div>
 
               <div className="flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <span>{project.label_schema.length} labels</span>
-                <span>{project.total_assignments} total assignments</span>
-                <span>{project.submitted_count} submitted</span>
-                <span>{project.accepted_count} accepted</span>
+                <span>{project.label_schema.length} меток</span>
+                <span>{project.total_assignments} заданий всего</span>
+                <span>{project.submitted_count} отправлено</span>
+                <span>{project.accepted_count} принято</span>
+                {tab === "completed" ? <span>{project.rejected_count} отклонено</span> : null}
               </div>
 
               <div className="flex justify-end">
                 <Link to={`/labeling/projects/${project.project_id}`} className="btn-primary">
-                  Open Project
+                  Открыть проект
                 </Link>
               </div>
             </div>

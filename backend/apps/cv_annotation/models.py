@@ -108,6 +108,7 @@ class WorkItem(Document):
     pre_annotations = DictField(default=dict)
     pre_annotation_model = StringField(default="")
     pre_annotation_confidence_threshold = FloatField(default=0.7)
+    workflow_meta = DictField(default=dict)
     video_qc = DictField(default=dict)
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
@@ -129,15 +130,17 @@ class Assignment(Document):
     STATUS_SUBMITTED = "submitted"
     STATUS_ACCEPTED = "accepted"
     STATUS_REJECTED = "rejected"
+    STATUS_DISPUTED = "disputed"
 
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     work_item = ReferenceField(WorkItem, required=True, reverse_delete_rule=CASCADE)
     annotator = ReferenceField(User, required=True, reverse_delete_rule=CASCADE)
     order_index = IntField(default=0)
+    queue_position = IntField(default=0)
     status = StringField(
         required=True,
         default=STATUS_ASSIGNED,
-        choices=[STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_DRAFT, STATUS_SUBMITTED, STATUS_ACCEPTED, STATUS_REJECTED],
+        choices=[STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_DRAFT, STATUS_SUBMITTED, STATUS_ACCEPTED, STATUS_REJECTED, STATUS_DISPUTED],
     )
     quality_signals = DictField(default=dict)
     started_at = DateTimeField(null=True)

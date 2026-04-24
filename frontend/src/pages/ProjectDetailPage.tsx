@@ -168,8 +168,8 @@ export default function ProjectDetailPage() {
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.work_items?.total ?? 0}</div>
         </div>
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Pending review</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.reviews?.pending ?? 0}</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">Low-agreement requeue</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.assignments?.disputed ?? 0}</div>
         </div>
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Completion</div>
@@ -255,7 +255,11 @@ export default function ProjectDetailPage() {
             <div>AI confidence: {String(projectQuery.data.participant_rules?.ai_confidence_threshold ?? 0.7)}</div>
             <div>Keyframe interval: {String(projectQuery.data.participant_rules?.video_keyframe_interval ?? 1)}</div>
             <div>Tracking: {String(projectQuery.data.participant_rules?.tracking_algorithm || "CSRT")}</div>
+            <div>Task batch size: {String(projectQuery.data.participant_rules?.task_batch_size ?? 10)}</div>
+            <div>Min consecutive frames: {String(projectQuery.data.participant_rules?.min_sequence_size ?? 3)}</div>
             <div>Annotator pool size: {projectQuery.data.allowed_annotator_ids.length}</div>
+            <div>Workflow batches created: {String(overview?.work_items?.workflow_batches_total ?? 0)}</div>
+            <div>Validation-ready frames: {String(overview?.work_items?.validation_ready_items ?? 0)}</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
             <div className="font-medium text-gray-900 dark:text-white">Instructions</div>

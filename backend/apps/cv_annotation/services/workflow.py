@@ -19,6 +19,14 @@ from .security import log_security_event
 from .upload import absolute_media_path, image_dimensions
 from .video_qc import build_video_qc_payload, interpolate_boxes
 
+DEFAULT_TASK_BATCH_SIZE = 10
+DEFAULT_MIN_SEQUENCE_SIZE = 3
+
+
+def _next_queue_position(project: Project) -> int:
+    last_assignment = Assignment.objects(project=project).order_by("-queue_position").first()
+    return int(last_assignment.queue_position or 0) + 1 if last_assignment else 0
+
 
 def build_import_preview(import_session: ImportSession) -> dict:
     assets = list(ImportAsset.objects(import_session=import_session))
@@ -236,17 +244,70 @@ def select_annotators_for_project(project: Project, limit: int) -> List[User]:
     return picked
 
 
+def _workflow_settings(project: Project) -> dict:
+    rules = project.participant_rules or {}
+    task_batch_size = max(1, int(rules.get("task_batch_size") or DEFAULT_TASK_BATCH_SIZE))
+    min_sequence_size = max(1, int(rules.get("min_sequence_size") or DEFAULT_MIN_SEQUENCE_SIZE))
+    return {
+        "task_batch_size": task_batch_size,
+        "min_sequence_size": min_sequence_size,
+    }
+
+
+def _build_asset_batches(asset: ImportAsset, frames: List[FrameItem], project: Project) -> List[dict]:
+    settings = _workflow_settings(project)
+    task_batch_size = settings["task_batch_size"]
+    min_sequence_size = settings["min_sequence_size"]
+    batches: List[dict] = []
+    total_batches = (len(frames) + task_batch_size - 1) // task_batch_size if frames else 0
+    for batch_number, start in enumerate(range(0, len(frames), task_batch_size), start=1):
+        batch_frames = frames[start : start + task_batch_size]
+        batch_id = f"{asset.id}:batch:{batch_number}"
+        batch_size = len(batch_frames)
+        for index, frame in enumerate(batch_frames, start=1):
+            batches.append(
+                {
+                    "frame": frame,
+                    "workflow_meta": {
+                        "task_batch_id": batch_id,
+                        "task_batch_number": batch_number,
+                        "task_batch_size": batch_size,
+                        "task_batch_target_size": task_batch_size,
+                        "task_batch_total": total_batches,
+                        "task_batch_index": index,
+                        "sequence_id": batch_id,
+                        "sequence_index": index,
+                        "sequence_length": batch_size,
+                        "min_sequence_size": min_sequence_size,
+                        "validation_ready": batch_size >= min_sequence_size,
+                        "asset_id": str(asset.id),
+                    },
+                }
+            )
+    return batches
+
+
 def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int]:
     project = import_session.project
     processed_assets = list(ImportAsset.objects(import_session=import_session, processing_status=ImportAsset.STATUS_PROCESSED))
     frame_ids = []
     created_work_items = 0
     created_assignments = 0
+    workflow_batches_total = 0
+    validation_ready_items = 0
+    queue_position = _next_queue_position(project)
     for asset in processed_assets:
-        for frame in FrameItem.objects(project=project, asset=asset):
+        asset_frames = list(FrameItem.objects(project=project, asset=asset).order_by("frame_number", "created_at"))
+        batch_entries = _build_asset_batches(asset, asset_frames, project)
+        if batch_entries:
+            workflow_batches_total += max(int(item["workflow_meta"]["task_batch_number"]) for item in batch_entries)
+        for entry in batch_entries:
+            frame = entry["frame"]
+            workflow_meta = entry["workflow_meta"]
             work_item = WorkItem.objects(project=project, frame=frame).first()
             if not work_item:
                 work_item = WorkItem(project=project, frame=frame)
+                work_item.workflow_meta = workflow_meta
                 ai_enabled = bool((project.participant_rules or {}).get("ai_prelabel_enabled", True))
                 if ai_enabled:
                     model_name = str((project.participant_rules or {}).get("ai_model") or "baseline-box-v1")
@@ -262,6 +323,11 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
                     )
                 work_item.save()
                 created_work_items += 1
+            else:
+                work_item.workflow_meta = workflow_meta
+                work_item.save()
+            if workflow_meta.get("validation_ready"):
+                validation_ready_items += 1
             selected_annotators = select_annotators_for_project(project, project.assignments_per_task)
             existing_annotators = {str(assignment.annotator.id) for assignment in Assignment.objects(work_item=work_item)}
             next_order = Assignment.objects(work_item=work_item).count()
@@ -273,10 +339,12 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
                     work_item=work_item,
                     annotator=annotator,
                     order_index=next_order,
+                    queue_position=queue_position,
                     status=Assignment.STATUS_ASSIGNED,
                 )
                 assignment.save()
                 created_assignments += 1
+                queue_position += 1
                 log_security_event(
                     project=project,
                     event_type=SecurityEvent.EVENT_ASSIGNMENT_DISTRIBUTION,
@@ -296,6 +364,9 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
         "work_items_created": created_work_items,
         "assignments_created": created_assignments,
         "frame_ids": frame_ids,
+        "workflow_batches_total": workflow_batches_total,
+        "validation_ready_items": validation_ready_items,
+        "workflow_settings": _workflow_settings(project),
         "cleanup": cleanup_summary,
     }
     import_session.status = ImportSession.STATUS_FINALIZED if created_work_items or processed_assets else ImportSession.STATUS_FAILED
@@ -439,28 +510,92 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
             update_user_quality(annotation.annotator, consensus_f1, disputed=False)
         _run_video_qc_for_work_item(work_item)
         return {"state": "accepted", "metrics": {"f1": consensus_f1, "pairs": pair_metrics}}
+    requeued_assignments = requeue_low_agreement_work_item(work_item, annotations, consensus_f1)
+    return {
+        "state": "requeued",
+        "metrics": {"f1": consensus_f1, "pairs": pair_metrics},
+        "requeued_assignments": requeued_assignments,
+    }
 
-    review = ReviewRecord.objects(work_item=work_item).first()
-    if not review:
-        review = ReviewRecord(project=work_item.project, work_item=work_item)
-    review.status = ReviewRecord.STATUS_PENDING
-    review.agreement_score = consensus_f1
-    review.metrics = {"f1": consensus_f1, "pairs": pair_metrics}
-    review.dispute_reason = "Low agreement between annotators"
-    golden = list(GoldenFrame.objects(project=work_item.project, is_active=True).limit(10))
-    review.golden_frame_ids = [str(item.id) for item in golden]
-    review.save()
 
-    work_item.status = WorkItem.STATUS_IN_REVIEW
-    work_item.review_required = True
-    work_item.review_status = "pending"
+def requeue_low_agreement_work_item(work_item: WorkItem, annotations: List[WorkAnnotation], consensus_f1: float) -> int:
+    project = work_item.project
+    existing_assignments = list(Assignment.objects(work_item=work_item).order_by("order_index", "created_at"))
+    submitted_by_id = {str(annotation.assignment.id): annotation for annotation in annotations}
+
+    for assignment in existing_assignments:
+        annotation = submitted_by_id.get(str(assignment.id)) or WorkAnnotation.objects(assignment=assignment).first()
+        if annotation:
+            annotation.status = WorkAnnotation.STATUS_REJECTED
+            annotation.is_final = False
+            annotation.save()
+        assignment.status = Assignment.STATUS_DISPUTED
+        assignment.quality_signals = {
+            **(assignment.quality_signals or {}),
+            "low_agreement_requeue": True,
+            "consensus_f1": consensus_f1,
+        }
+        assignment.save()
+        if annotation and annotation.annotator:
+            update_user_quality(annotation.annotator, consensus_f1, disputed=True)
+
+    work_item.status = WorkItem.STATUS_PENDING
+    work_item.review_required = False
+    work_item.review_status = "requeued_low_agreement"
+    work_item.final_annotation = {}
+    work_item.final_source = ""
     work_item.save()
 
-    for annotation in annotations:
-        annotation.assignment.status = Assignment.STATUS_SUBMITTED
-        annotation.assignment.save()
-        update_user_quality(annotation.annotator, consensus_f1, disputed=True)
-    return {"state": "review", "metrics": {"f1": consensus_f1, "pairs": pair_metrics}, "review_id": str(review.id)}
+    required_assignments = max(1, int(project.assignments_per_task or 1))
+    queue_position = _next_queue_position(project)
+    existing_annotator_ids = {str(item.annotator.id) for item in existing_assignments}
+    fresh_candidates = [
+        user
+        for user in select_annotators_for_project(project, max(required_assignments * 3, len(existing_assignments) + required_assignments))
+        if str(user.id) not in existing_annotator_ids
+    ]
+
+    created = 0
+    next_order = Assignment.objects(work_item=work_item).count()
+    for annotator in fresh_candidates[:required_assignments]:
+        Assignment(
+            project=project,
+            work_item=work_item,
+            annotator=annotator,
+            order_index=next_order,
+            queue_position=queue_position,
+            status=Assignment.STATUS_ASSIGNED,
+        ).save()
+        created += 1
+        next_order += 1
+        queue_position += 1
+        log_security_event(
+            project=project,
+            event_type=SecurityEvent.EVENT_ASSIGNMENT_DISTRIBUTION,
+            payload={
+                "work_item_id": str(work_item.id),
+                "annotator_id": str(annotator.id),
+                "reason": "low_agreement_requeue",
+            },
+            severity="warning",
+        )
+
+    if created < required_assignments:
+        reusable_assignments = sorted(existing_assignments, key=lambda item: (item.order_index, item.created_at))
+        for assignment in reusable_assignments[: required_assignments - created]:
+            assignment.status = Assignment.STATUS_ASSIGNED
+            assignment.started_at = None
+            assignment.submitted_at = None
+            assignment.queue_position = queue_position
+            assignment.quality_signals = {
+                **(assignment.quality_signals or {}),
+                "requeue_count": int((assignment.quality_signals or {}).get("requeue_count") or 0) + 1,
+            }
+            assignment.save()
+            queue_position += 1
+            created += 1
+
+    return created
 
 
 def save_assignment_annotation(assignment: Assignment, label_data: dict, comment: str, is_final: bool) -> Tuple[WorkAnnotation, Optional[dict]]:
@@ -631,6 +766,8 @@ def project_overview(project: Project) -> dict:
             "in_review": sum(1 for item in work_items if item.status == WorkItem.STATUS_IN_REVIEW),
             "completed": sum(1 for item in work_items if item.status == WorkItem.STATUS_COMPLETED),
             "average_agreement": round(sum(item.agreement_score for item in work_items) / len(work_items), 4) if work_items else 0.0,
+            "workflow_batches_total": len({item.workflow_meta.get("task_batch_id") for item in work_items if item.workflow_meta.get("task_batch_id")}),
+            "validation_ready_items": sum(1 for item in work_items if item.workflow_meta.get("validation_ready")),
         },
         "assignments": {
             "total": len(assignments),
@@ -640,6 +777,7 @@ def project_overview(project: Project) -> dict:
             "submitted": sum(1 for item in assignments if item.status == Assignment.STATUS_SUBMITTED),
             "accepted": sum(1 for item in assignments if item.status == Assignment.STATUS_ACCEPTED),
             "rejected": sum(1 for item in assignments if item.status == Assignment.STATUS_REJECTED),
+            "disputed": sum(1 for item in assignments if item.status == Assignment.STATUS_DISPUTED),
         },
         "reviews": {
             "pending": sum(1 for review in reviews if review.status == ReviewRecord.STATUS_PENDING),

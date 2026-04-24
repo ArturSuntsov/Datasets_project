@@ -213,9 +213,9 @@ class AnnotatorProjectsView(AuthenticatedAPIView):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         assignments = list(
-            Assignment.objects(annotator=user).order_by("-updated_at", "-created_at")
+            Assignment.objects(annotator=user).order_by("queue_position", "-updated_at", "-created_at")
             if user.role == User.ROLE_ANNOTATOR
-            else Assignment.objects.order_by("-updated_at", "-created_at")
+            else Assignment.objects.order_by("queue_position", "-updated_at", "-created_at")
         )
         grouped: dict[str, dict] = {}
         for assignment in assignments:
@@ -237,12 +237,18 @@ class AnnotatorProjectsView(AuthenticatedAPIView):
                     "submitted_count": 0,
                     "accepted_count": 0,
                     "rejected_count": 0,
+                    "completed_count": 0,
+                    "batch_count": 0,
+                    "validation_ready_count": 0,
                     "total_assignments": 0,
                     "next_assignment_id": None,
                     "active_assignment_id": None,
                     "last_activity_at": assignment.updated_at or assignment.created_at,
                 }
                 grouped[project_id] = bucket
+            workflow_meta = assignment.work_item.workflow_meta or {}
+            if workflow_meta.get("validation_ready"):
+                bucket["validation_ready_count"] += 1
 
             bucket["total_assignments"] += 1
             if assignment.status == Assignment.STATUS_ASSIGNED:
@@ -265,22 +271,41 @@ class AnnotatorProjectsView(AuthenticatedAPIView):
             elif assignment.status == Assignment.STATUS_REJECTED:
                 bucket["rejected_count"] += 1
 
+            bucket["completed_count"] = bucket["accepted_count"] + bucket["rejected_count"]
+            bucket["batch_count"] = len(
+                {
+                    item.work_item.workflow_meta.get("task_batch_id")
+                    for item in assignments
+                    if str(item.project.id) == project_id and item.work_item.workflow_meta.get("task_batch_id")
+                }
+            )
             assignment_updated = assignment.updated_at or assignment.created_at
             if assignment_updated and assignment_updated > bucket["last_activity_at"]:
                 bucket["last_activity_at"] = assignment_updated
 
         available_projects = []
         active_projects = []
+        completed_projects = []
         for project in grouped.values():
             if project["active_assignment_id"]:
                 active_projects.append(project)
             elif project["available_count"] > 0:
                 available_projects.append(project)
+            else:
+                completed_projects.append(project)
 
         sort_key = lambda item: (-(item.get("active_count", 0) + item.get("available_count", 0)), item.get("project_title", ""))
         active_projects.sort(key=sort_key)
         available_projects.sort(key=sort_key)
-        return Response({"available_projects": available_projects, "active_projects": active_projects}, status=status.HTTP_200_OK)
+        completed_projects.sort(key=lambda item: (-item.get("completed_count", 0), item.get("project_title", "")))
+        return Response(
+            {
+                "available_projects": available_projects,
+                "active_projects": active_projects,
+                "completed_projects": completed_projects,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AnnotatorProjectDetailView(AuthenticatedAPIView):
@@ -295,7 +320,7 @@ class AnnotatorProjectDetailView(AuthenticatedAPIView):
         if user.role not in (User.ROLE_ANNOTATOR, User.ROLE_ADMIN):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        assignments_qs = Assignment.objects(project=project, annotator=user).order_by("status", "created_at") if user.role == User.ROLE_ANNOTATOR else Assignment.objects(project=project).order_by("status", "created_at")
+        assignments_qs = Assignment.objects(project=project, annotator=user).order_by("queue_position", "created_at") if user.role == User.ROLE_ANNOTATOR else Assignment.objects(project=project).order_by("queue_position", "created_at")
         assignments = list(assignments_qs)
         next_assignment = next((item for item in assignments if item.status == Assignment.STATUS_ASSIGNED), None)
         active_assignment = next((item for item in assignments if item.status in [Assignment.STATUS_IN_PROGRESS, Assignment.STATUS_DRAFT]), None)
@@ -319,8 +344,12 @@ class AnnotatorProjectDetailView(AuthenticatedAPIView):
                 "submitted_count": sum(1 for item in assignments if item.status == Assignment.STATUS_SUBMITTED),
                 "accepted_count": sum(1 for item in assignments if item.status == Assignment.STATUS_ACCEPTED),
                 "rejected_count": sum(1 for item in assignments if item.status == Assignment.STATUS_REJECTED),
+                "completed_count": sum(1 for item in assignments if item.status in [Assignment.STATUS_ACCEPTED, Assignment.STATUS_REJECTED]),
                 "total_assignments": len(assignments),
+                "batch_count": len({item.work_item.workflow_meta.get("task_batch_id") for item in assignments if item.work_item.workflow_meta.get("task_batch_id")}),
+                "validation_ready_count": sum(1 for item in assignments if item.work_item.workflow_meta.get("validation_ready")),
             },
+            "workflow": project_overview(project).get("work_items", {}),
             "next_assignment_id": str(next_assignment.id) if next_assignment else None,
             "active_assignment_id": str(active_assignment.id) if active_assignment else None,
         }
@@ -340,9 +369,9 @@ class AnnotatorProjectNextAssignmentView(AuthenticatedAPIView):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         assignments = list(
-            Assignment.objects(project=project, annotator=user).order_by("created_at")
+            Assignment.objects(project=project, annotator=user).order_by("queue_position", "created_at")
             if user.role == User.ROLE_ANNOTATOR
-            else Assignment.objects(project=project).order_by("created_at")
+            else Assignment.objects(project=project).order_by("queue_position", "created_at")
         )
         active_assignment = next((item for item in assignments if item.status in [Assignment.STATUS_IN_PROGRESS, Assignment.STATUS_DRAFT]), None)
         if active_assignment:
@@ -372,6 +401,12 @@ class AnnotatorAssignmentDetailView(AuthenticatedAPIView):
             assignment.status = Assignment.STATUS_IN_PROGRESS
             assignment.save()
         annotation = WorkAnnotation.objects(assignment=assignment).first()
+        draft_payload = annotation.label_data if annotation and annotation.status == WorkAnnotation.STATUS_DRAFT else {"boxes": []}
+        draft_comment = annotation.comment if annotation and annotation.status == WorkAnnotation.STATUS_DRAFT else ""
+        pre_annotations = assignment.work_item.pre_annotations or {}
+        preannotation_payload = {}
+        if pre_annotations and not pre_annotations.get("is_placeholder") and assignment.work_item.pre_annotation_model not in {"", "baseline-box-v1"}:
+            preannotation_payload = pre_annotations
         return Response(
             {
                 "assignment_id": str(assignment.id),
@@ -386,11 +421,13 @@ class AnnotatorAssignmentDetailView(AuthenticatedAPIView):
                     "height": assignment.work_item.frame.height,
                 },
                 "status": assignment.status,
+                "queue_position": assignment.queue_position,
                 "instructions": assignment.project.instructions,
                 "label_schema": assignment.project.label_schema or [],
-                "draft": annotation.label_data if annotation else {"boxes": []},
-                "pre_annotations": assignment.work_item.pre_annotations or {},
-                "comment": annotation.comment if annotation else "",
+                "workflow_meta": assignment.work_item.workflow_meta or {},
+                "draft": draft_payload,
+                "pre_annotations": preannotation_payload,
+                "comment": draft_comment,
                 "quality_signals": assignment.quality_signals or {},
             },
             status=status.HTTP_200_OK,

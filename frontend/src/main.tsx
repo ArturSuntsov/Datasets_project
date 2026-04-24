@@ -1,24 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import App from "./App";
 import { useAuthStore } from "./store";
+import { queryClient } from "./queryClient";
 import "./index.css";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
 
 function BootstrapAuth() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -27,7 +15,6 @@ function BootstrapAuth() {
 
   React.useEffect(() => {
     if (isAuthenticated && !user) {
-      // Загружаем профиль после старта приложения.
       loadMe();
     }
   }, [isAuthenticated, user, loadMe]);
@@ -47,4 +34,3 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ErrorBoundary>
   </React.StrictMode>
 );
-

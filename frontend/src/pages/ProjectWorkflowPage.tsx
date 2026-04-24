@@ -56,6 +56,8 @@ function normalizeParticipantRules(rules?: ProjectParticipantRules): Required<Pr
     ai_confidence_threshold: Number(rules?.ai_confidence_threshold ?? 0.7),
     video_keyframe_interval: Number(rules?.video_keyframe_interval ?? 1),
     tracking_algorithm: String(rules?.tracking_algorithm ?? "CSRT"),
+    task_batch_size: Number(rules?.task_batch_size ?? 10),
+    min_sequence_size: Number(rules?.min_sequence_size ?? 3),
   };
 }
 
@@ -122,6 +124,8 @@ export default function ProjectWorkflowPage() {
   const [aiConfidenceThreshold, setAiConfidenceThreshold] = useState("0.7");
   const [videoKeyframeInterval, setVideoKeyframeInterval] = useState("1");
   const [trackingAlgorithm, setTrackingAlgorithm] = useState<(typeof TRACKING_ALGORITHMS)[number]>("CSRT");
+  const [taskBatchSize, setTaskBatchSize] = useState("10");
+  const [minSequenceSize, setMinSequenceSize] = useState("3");
   const [labels, setLabels] = useState<ProjectLabel[]>([{ name: "drone", color: getDefaultLabelColor(0) }]);
   const [selectedAnnotators, setSelectedAnnotators] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -162,6 +166,8 @@ export default function ProjectWorkflowPage() {
     setAiModel(rules.ai_model);
     setAiConfidenceThreshold(String(rules.ai_confidence_threshold));
     setVideoKeyframeInterval(String(rules.video_keyframe_interval));
+    setTaskBatchSize(String(rules.task_batch_size));
+    setMinSequenceSize(String(rules.min_sequence_size));
     setTrackingAlgorithm(
       (TRACKING_ALGORITHMS.includes(rules.tracking_algorithm as (typeof TRACKING_ALGORITHMS)[number]) ? rules.tracking_algorithm : "CSRT") as (typeof TRACKING_ALGORITHMS)[number]
     );
@@ -199,6 +205,8 @@ export default function ProjectWorkflowPage() {
           ai_confidence_threshold: Number(aiConfidenceThreshold) || 0.7,
           video_keyframe_interval: Number(videoKeyframeInterval) || 1,
           tracking_algorithm: trackingAlgorithm,
+          task_batch_size: Number(taskBatchSize) || 10,
+          min_sequence_size: Number(minSequenceSize) || 3,
         },
         label_schema: labels,
         allowed_annotator_ids: selectedAnnotators,
@@ -408,6 +416,23 @@ export default function ProjectWorkflowPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Task packaging and validation prep</div>
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Frames per task batch</label>
+                  <input type="number" min="1" step="1" className="input-field" value={taskBatchSize} onChange={(e) => setTaskBatchSize(e.target.value)} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Min consecutive frames</label>
+                  <input type="number" min="1" step="1" className="input-field" value={minSequenceSize} onChange={(e) => setMinSequenceSize(e.target.value)} />
+                </div>
+              </div>
+              <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                Based on the CV workflow document, batches are prepared in ordered frame groups so downstream inter-frame validation can work on neighboring frames.
               </div>
             </div>
           </div>

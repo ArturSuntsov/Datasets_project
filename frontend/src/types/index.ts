@@ -183,6 +183,8 @@ export interface ProjectParticipantRules {
   ai_confidence_threshold?: number;
   video_keyframe_interval?: number;
   tracking_algorithm?: string;
+  task_batch_size?: number;
+  min_sequence_size?: number;
 }
 
 export interface Project {
@@ -313,6 +315,9 @@ export interface AnnotatorProjectSummary {
   submitted_count: number;
   accepted_count: number;
   rejected_count: number;
+  completed_count?: number;
+  batch_count?: number;
+  validation_ready_count?: number;
   total_assignments: number;
   next_assignment_id?: string | null;
   active_assignment_id?: string | null;
@@ -322,6 +327,7 @@ export interface AnnotatorProjectSummary {
 export interface AnnotatorProjectsResponse {
   available_projects: AnnotatorProjectSummary[];
   active_projects: AnnotatorProjectSummary[];
+  completed_projects: AnnotatorProjectSummary[];
 }
 
 export interface AnnotatorProjectDetail {
@@ -343,10 +349,33 @@ export interface AnnotatorProjectDetail {
     submitted_count: number;
     accepted_count: number;
     rejected_count: number;
+    completed_count: number;
     total_assignments: number;
+    batch_count: number;
+    validation_ready_count: number;
+  };
+  workflow?: {
+    workflow_batches_total?: number;
+    validation_ready_items?: number;
+    [key: string]: unknown;
   };
   next_assignment_id?: string | null;
   active_assignment_id?: string | null;
+}
+
+export interface AssignmentWorkflowMeta {
+  task_batch_id?: string;
+  task_batch_number?: number;
+  task_batch_size?: number;
+  task_batch_target_size?: number;
+  task_batch_total?: number;
+  task_batch_index?: number;
+  sequence_id?: string;
+  sequence_index?: number;
+  sequence_length?: number;
+  min_sequence_size?: number;
+  validation_ready?: boolean;
+  asset_id?: string;
 }
 
 export interface AssignmentDetail {
@@ -362,8 +391,10 @@ export interface AssignmentDetail {
     height: number;
   };
   status: string;
+  queue_position?: number;
   instructions: string;
   label_schema: ProjectLabel[];
+  workflow_meta?: AssignmentWorkflowMeta;
   draft: { boxes: BoundingBox[] };
   pre_annotations?: { boxes?: BoundingBox[]; [key: string]: unknown };
   comment: string;
@@ -389,9 +420,10 @@ export interface AssignmentSubmitResponse {
   assignment_status: string;
   annotation_status: string;
   evaluation?: {
-    state: "accepted" | "review";
+    state: "accepted" | "requeued";
     metrics: Record<string, unknown>;
     review_id?: string;
+    requeued_assignments?: number;
   } | null;
 }
 

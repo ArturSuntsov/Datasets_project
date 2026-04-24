@@ -36,6 +36,13 @@ from apps.cv_annotation.models import ImportSession, ImportAsset, FrameItem, Wor
 
 
 # =============================================================================
+# Безопасные тестовые пароли (из переменных окружения)
+# =============================================================================
+TEST_PASSWORD = os.getenv("TEST_PASSWORD", "test-password-for-dev-only")
+TEST_ADMIN_PASSWORD = os.getenv("TEST_ADMIN_PASSWORD", "test-admin-password-for-dev-only")
+
+
+# =============================================================================
 # Фикстуры для подключения к тестовой базе данных
 # =============================================================================
 
@@ -125,7 +132,7 @@ def user_customer(db):
         username="customer_user",
         role=User.ROLE_CUSTOMER,
     )
-    user.set_password("password123")
+    user.set_password(TEST_PASSWORD)
     user.save()
     return user
 
@@ -144,7 +151,7 @@ def user_annotator(db):
         username="annotator_user",
         role=User.ROLE_ANNOTATOR,
     )
-    user.set_password("password123")
+    user.set_password(TEST_PASSWORD)
     user.balance = Decimal("100.00")  # Начальный баланс для тестов
     user.save()
     return user
@@ -164,7 +171,7 @@ def user_admin(db):
         username="admin_user",
         role=User.ROLE_ADMIN,
     )
-    user.set_password("admin123")
+    user.set_password(TEST_ADMIN_PASSWORD)
     user.save()
     return user
 
@@ -180,31 +187,34 @@ def user_inactive(db):
         role=User.ROLE_CUSTOMER,
         is_active=False,
     )
-    user.set_password("password123")
+    user.set_password(TEST_PASSWORD)
     user.save()
     return user
 
 
 @pytest.fixture
 def user_reviewer(db):
+    """Создает пользователя с ролью reviewer."""
     user = User(
         email="reviewer@example.com",
         username="reviewer_user",
         role=User.ROLE_REVIEWER,
     )
-    user.set_password("password123")
+    user.set_password(TEST_PASSWORD)
     user.save()
     return user
 
 
 @pytest.fixture
 def jwt_token_reviewer(user_reviewer):
+    """JWT токен для reviewer."""
     from apps.users.serializers import create_access_token
     return create_access_token(user_reviewer)
 
 
 @pytest.fixture
 def auth_headers_reviewer(jwt_token_reviewer):
+    """Заголовки авторизации для reviewer."""
     return {"HTTP_AUTHORIZATION": f"Bearer {jwt_token_reviewer}"}
 
 

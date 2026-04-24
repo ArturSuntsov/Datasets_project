@@ -16,7 +16,14 @@ docker-compose up -d
 - **Frontend:** http://localhost:5173
 - **Backend API:** http://localhost:8000/api/
 
-**Вход:**
+### 4. Создайте первого пользователя
+Откройте frontend и зарегистрируйтесь через форму, либо через API:
+```bash
+curl -X POST http://localhost:8000/api/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","username":"admin","password":"your-strong-password","role":"admin"}'
+  ```
+
 ```
 Email: admin@example.com
 Пароль: admin123

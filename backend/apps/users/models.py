@@ -67,6 +67,9 @@ class User(Document):
     groups = ListField(StringField(max_length=100), default=list)  # список групп/команд
     experience_level = StringField(max_length=50, default="")
 
+    # ✅ Аватар пользователя (хранится как data URL: data:image/...;base64,...)
+    avatar_file = StringField(default="")
+
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 

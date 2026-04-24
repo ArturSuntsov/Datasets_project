@@ -155,6 +155,121 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
             return Response({"detail": "No pending tasks available"}, status=status.HTTP_404_NOT_FOUND)
         return Response(TaskSerializer(task, context={"request": request}).data, status=status.HTTP_200_OK)
 
+    # =============================================================================
+    # ЛИДЕРБОРД ПРОЕКТА
+    # =============================================================================
+    @action(detail=True, methods=["get"], url_path="leaderboard")
+    def leaderboard(self, request, pk: str = None, *args, **kwargs) -> Response:
+        """
+        Получить лидерборд проекта.
+        GET /api/projects/{id}/leaderboard/
+        
+        Возвращает топ-10 аннотаторов проекта с метриками:
+        - completed_tasks: количество выполненных задач
+        - average_f1: средний F1-score
+        - total_annotations: общее количество аннотаций
+        - rating: рейтинг
+        """
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        
+        if not ObjectId.is_valid(pk):
+            return Response({"detail": "Invalid project id"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        project = Project.objects(id=ObjectId(pk)).first()
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Проверка доступа к проекту
+        if user.role not in (User.ROLE_ADMIN, User.ROLE_CUSTOMER):
+            is_member = ProjectMembership.objects(
+                project=project, user=user, is_active=True
+            ).first()
+            if not is_member and str(project.owner.id) != str(user.id):
+                return Response({"detail": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
+        
+        from ..quality.models import QualityMetric
+        
+        # Получаем все задачи проекта
+        project_tasks = Task.objects(project=project)
+        project_task_ids = [t.id for t in project_tasks]
+        
+        if not project_task_ids:
+            return Response({
+                'leaderboard': [],
+                'current_user': None,
+                'total_participants': 0,
+            })
+        
+        # Получаем аннотаторов проекта (всех, кто сделал хотя бы одну аннотацию)
+        annotator_ids = list(
+            Annotation.objects(task__in=project_task_ids).distinct("annotator")
+        )
+        
+        leaderboard = []
+        for ann_id in annotator_ids:
+            ann = User.objects(id=ann_id).first()
+            if not ann:
+                continue
+            
+            # Аннотации этого пользователя в проекте
+            ann_annotations = Annotation.objects(
+                annotator=ann,
+                task__in=project_task_ids
+            )
+            
+            # Количество выполненных аннотаций (не черновиков)
+            completed = ann_annotations.filter(
+                status__in=["submitted", "accepted", "pending_review"]
+            ).count()
+            
+            # Уникальные задачи, которые размечал пользователь
+            unique_tasks = len(set(a.task.id for a in ann_annotations))
+            
+            # Средний F1-score по метрикам качества для задач этого пользователя
+            user_task_ids = [a.task.id for a in ann_annotations]
+            metrics = QualityMetric.objects(task__in=user_task_ids)
+            if metrics.count() > 0:
+                avg_f1 = round(sum(m.f1 for m in metrics) / metrics.count(), 3)
+            else:
+                avg_f1 = 0.0
+            
+            leaderboard.append({
+                'user_id': str(ann.id),
+                'username': ann.username,
+                'email': ann.email,
+                'rating': round(ann.rating or 0.0, 2),
+                'completed_tasks': completed,
+                'unique_tasks': unique_tasks,
+                'total_annotations': ann_annotations.count(),
+                'average_f1': avg_f1,
+            })
+        
+        # Сортировка: сначала по среднему F1, потом по количеству выполненных задач
+        leaderboard.sort(key=lambda x: (x['average_f1'], x['completed_tasks']), reverse=True)
+        
+        # Топ-10
+        top_10 = leaderboard[:10]
+        
+        # Добавляем позицию
+        for i, entry in enumerate(top_10):
+            entry['position'] = i + 1
+        
+        # Находим текущего пользователя (если он есть в списке)
+        current_user_entry = None
+        for idx, entry in enumerate(leaderboard):
+            if entry['user_id'] == str(user.id):
+                current_user_entry = entry
+                current_user_entry['position'] = idx + 1
+                break
+        
+        return Response({
+            'leaderboard': top_10,
+            'current_user': current_user_entry,
+            'total_participants': len(leaderboard),
+        })
+
 
 class TaskViewSet(JWTRequiredMixin, ViewSet):
     def _base_qs(self, user: User):

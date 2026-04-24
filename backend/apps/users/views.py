@@ -150,6 +150,7 @@ def me_view(request):
             'is_active': user.is_active,
             'rating': user.rating,
             'balance': str(user.balance) if user.balance else '0',
+            'avatar_url': user.avatar_file if user.avatar_file else None,  # ✅ Аватар
             'created_at': user.created_at.isoformat() if user.created_at else None,
         }
         logger.info(f"me_view: возвращаем данные: {result}")
@@ -527,3 +528,179 @@ class BulkCreateAnnotatorsView(APIView):
         response = FileResponse(output_io, content_type='text/plain; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="annotators_credentials.txt"'
         return response
+
+# =============================================================================
+# СТАТИСТИКА ПОЛЬЗОВАТЕЛЯ
+# =============================================================================
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def user_stats_view(request):
+    """
+    Получить детальную статистику текущего пользователя.
+    GET /api/users/me/stats/
+    
+    Возвращает:
+    - rating: текущий рейтинг
+    - level: уровень (novice/intermediate/advanced/expert)
+    - completed_tasks: количество выполненных задач
+    - total_annotations: общее количество аннотаций
+    - average_f1: средний F1-score по проверкам качества
+    - reviews_count: количество проверок качества
+    - balance: текущий баланс
+    """
+    logger.info("=" * 60)
+    logger.info("USER_STATS_VIEW: Запрос статистики пользователя")
+    
+    try:
+        user = authenticate_from_jwt(request)
+    except PermissionError as e:
+        return Response({'detail': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Подсчёт выполненных задач (через Annotation + Task)
+    from ..labeling.models import Annotation
+    from ..projects.models import Task
+    
+    # Количество аннотаций пользователя
+    total_annotations = Annotation.objects(annotator=user).count()
+    
+    # Количество уникальных задач, размеченных пользователем
+    completed_task_ids = list(
+        Annotation.objects(annotator=user).distinct("task")
+    )
+    completed_tasks = len(completed_task_ids)
+    
+    # Средний F1-score из QualityMetric
+    from ..quality.models import QualityMetric
+    metrics = QualityMetric.objects(task__in=completed_task_ids)
+    if metrics.count() > 0:
+        average_f1 = sum(m.f1 for m in metrics) / metrics.count()
+    else:
+        average_f1 = 0.0
+    
+    # Количество проверок качества (где пользователь был аннотатором)
+    from ..quality.models import QualityReview
+    reviews_count = QualityReview.objects(
+        Q(annotation_a__annotator=user) | Q(annotation_b__annotator=user)
+    ).count()
+    
+    # Определение уровня на основе рейтинга
+    rating = user.rating or 0.0
+    if rating >= 4.5:
+        level = "expert"
+        level_label = "Эксперт"
+        level_color = "#8B5CF6"  # Фиолетовый
+    elif rating >= 3.5:
+        level = "advanced"
+        level_label = "Продвинутый"
+        level_color = "#3B82F6"  # Синий
+    elif rating >= 2.0:
+        level = "intermediate"
+        level_label = "Уверенный"
+        level_color = "#10B981"  # Зелёный
+    else:
+        level = "novice"
+        level_label = "Новичок"
+        level_color = "#F59E0B"  # Жёлтый
+    
+    result = {
+        'rating': round(rating, 2),
+        'level': level,
+        'level_label': level_label,
+        'level_color': level_color,
+        'completed_tasks': completed_tasks,
+        'total_annotations': total_annotations,
+        'average_f1': round(average_f1, 3),
+        'reviews_count': reviews_count,
+        'balance': str(user.balance) if user.balance else '0',
+        'next_level_rating': min(5.0, (int(rating) + 1)),
+    }
+    
+    logger.info(f"user_stats: возвращаем статистику для {user.email}")
+    return Response(result)
+
+# =============================================================================
+# АВАТАР ПОЛЬЗОВАТЕЛЯ
+# =============================================================================
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def avatar_upload_view(request):
+    """
+    Загрузить аватар пользователя.
+    POST /api/users/me/avatar/
+    
+    Принимает:
+    - file: изображение (jpg, png, gif)
+    
+    Возвращает:
+    - avatar_url: URL загруженного аватара
+    """
+    try:
+        user = authenticate_from_jwt(request)
+    except PermissionError as e:
+        return Response({'detail': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    uploaded_file = request.FILES.get('file')
+    if not uploaded_file:
+        return Response({'detail': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Проверка типа файла
+    allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if uploaded_file.content_type not in allowed_types:
+        return Response(
+            {'detail': f'Неподдерживаемый формат. Разрешены: {", ".join(allowed_types)}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Проверка размера (макс 5MB)
+    max_size = 5 * 1024 * 1024  # 5MB
+    if uploaded_file.size > max_size:
+        return Response(
+            {'detail': 'Файл слишком большой. Максимальный размер: 5MB'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Сохраняем файл в GridFS через mongoengine
+    import base64
+    import hashlib
+    
+    file_content = uploaded_file.read()
+    
+    # Для MVP храним как base64 (в production лучше GridFS)
+    file_b64 = base64.b64encode(file_content).decode('utf-8')
+    mime_type = uploaded_file.content_type
+    
+    # Сохраняем в поле avatar_file как data URL
+    data_url = f"data:{mime_type};base64,{file_b64}"
+    
+    # Проверяем размер (макс 500KB после base64)
+    if len(data_url) > 500 * 1024:
+        return Response(
+            {'detail': 'Изображение слишком большое после обработки. Используйте файл меньше 500KB.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    user.avatar_file = data_url
+    user.save()
+    
+    return Response({
+        'avatar_url': data_url,
+        'message': 'Аватар успешно загружен',
+    })
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.AllowAny])
+def avatar_delete_view(request):
+    """
+    Удалить аватар пользователя.
+    DELETE /api/users/me/avatar/
+    """
+    try:
+        user = authenticate_from_jwt(request)
+    except PermissionError as e:
+        return Response({'detail': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    user.avatar_file = ""
+    user.save()
+    
+    return Response({'message': 'Аватар удалён'})

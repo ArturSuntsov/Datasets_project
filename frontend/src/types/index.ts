@@ -11,6 +11,7 @@ export interface User {
   group_name?: string;
   groups?: string[];
   experience_level?: string;
+  avatar_url?: string | null;  // ✅ Аватар (data URL)
 }
 
 export type DatasetStatus = "draft" | "active" | "archived";
@@ -209,4 +210,37 @@ export interface PaymentRequestBody {
   task_id?: string | null;
   description?: string;
   metadata?: Record<string, unknown>;
+}
+
+// ------------------ Stats ------------------
+export interface UserStats {
+  rating: number;
+  level: "novice" | "intermediate" | "advanced" | "expert";
+  level_label: string;
+  level_color: string;
+  completed_tasks: number;
+  total_annotations: number;
+  average_f1: number;
+  reviews_count: number;
+  balance: string;
+  next_level_rating: number;
+}
+
+// ------------------ Leaderboard ------------------
+export interface LeaderboardEntry {
+  position: number;
+  user_id: string;
+  username: string;
+  email: string;
+  rating: number;
+  completed_tasks: number;
+  unique_tasks: number;
+  total_annotations: number;
+  average_f1: number;
+}
+
+export interface LeaderboardResponse {
+  leaderboard: LeaderboardEntry[];
+  current_user: LeaderboardEntry | null;
+  total_participants: number;
 }

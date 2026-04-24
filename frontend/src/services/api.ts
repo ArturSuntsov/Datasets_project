@@ -328,7 +328,7 @@ export const workflowAPI = {
   },
 };
 
-// ------------------ Users API (массовое создание) ------------------
+// ------------------ Users API (массовое создание + аватар) ------------------
 export const usersAPI = {
   async bulkCreateAnnotators(file: File, groups: string, specialization?: string, experienceLevel?: string): Promise<Blob> {
     const formData = new FormData();
@@ -341,6 +341,43 @@ export const usersAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
       responseType: 'blob',
     });
+    return res.data;
+  },
+
+  // ✅ Загрузка аватарки
+  async uploadAvatar(file: File): Promise<{ avatar_url: string; message: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const res = await api.post<{ avatar_url: string; message: string }>(
+      '/api/users/me/avatar/',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    return res.data;
+  },
+
+  // ✅ Удаление аватарки
+  async deleteAvatar(): Promise<{ message: string }> {
+    const res = await api.delete<{ message: string }>('/api/users/me/avatar/delete/');
+    return res.data;
+  },
+};
+
+// ------------------ Stats API ------------------
+export const statsAPI = {
+  async myStats(): Promise<UserStats> {
+    const res = await api.get<UserStats>("/api/users/me/stats/");
+    return res.data;
+  },
+};
+
+// ------------------ Leaderboard API ------------------
+export const leaderboardAPI = {
+  async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
+    const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
     return res.data;
   },
 };

@@ -4,9 +4,8 @@ from typing import Any, Dict
 
 from bson import ObjectId
 from django.http import HttpRequest
-from mongoengine.errors import ValidationError as MongoValidationError
 from rest_framework import status
-from rest_framework.exceptions import NotFound, ParseError, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

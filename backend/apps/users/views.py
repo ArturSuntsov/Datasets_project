@@ -17,7 +17,7 @@ import jwt
 from bson import ObjectId
 from django.conf import settings
 from django.http import HttpRequest
-from mongoengine import DoesNotExist, Q
+from mongoengine import Q
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response

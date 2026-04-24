@@ -18,7 +18,7 @@ from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 
 # Импорты ViewSet'ов для роутинга
-from apps.users.views import register, login, me_view, participants_view
+from apps.users.views import register, login, me_view, participants_view, user_stats_view, avatar_upload_view, avatar_delete_view, BulkCreateAnnotatorsView
 from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView
 from apps.projects.views import ProjectViewSet, TaskViewSet
 from apps.labeling.views import AnnotationViewSet
@@ -57,7 +57,13 @@ urlpatterns = [
 
         # Пользователь (текущий)
         path("users/me/", me_view, name="user-me"),
+        path("users/me/stats/", user_stats_view, name="user-stats"),
+        path("users/me/avatar/", avatar_upload_view, name="avatar-upload"),
+        path("users/me/avatar/delete/", avatar_delete_view, name="avatar-delete"),
         path("users/participants/", participants_view, name="user-participants"),
+        
+        # ✅ МАССОВОЕ СОЗДАНИЕ АННОТАТОРОВ
+        path("users/bulk-create-annotators/", BulkCreateAnnotatorsView.as_view(), name="bulk-create-annotators"),
 
         # Авторизация (function-based views)
         path("auth/register/", register, name="auth-register"),

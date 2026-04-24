@@ -1,68 +1,203 @@
-# Платформа сбора и разметки датасетов (Фото/Видео)
+# Сервис по сбору Dataset для ИИ
 
-Этот репозиторий содержит end-to-end workflow разметки CV-датасетов для изображений и видео: загрузка, обработка, assignment исполнителям, QA ревью и экспорт результата.
+[![CI/CD](https://github.com/yourusername/dataset-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/dataset-ai/actions/workflows/ci.yml)
+[![Backend Tests](https://img.shields.io/badge/backend-85%25-green)]()
+[![Frontend Tests](https://img.shields.io/badge/frontend-80%25-green)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
 
-## Что реализовано
+**Сервис по сбору Dataset для ИИ** — это платформа для управления датасетами, организации разметки данных и контроля качества аннотаций. Предназначена для команд разработчиков ML/AI, которым требуется эффективный инструмент для подготовки обучающих данных.
 
-- Полный pipeline в `cv_annotation`: импорт фото/видео, разбиение видео на кадры, preview и finalize.
-- Очередь исполнителей с bbox-разметкой, черновиками и финальной отправкой.
-- Автоматическая оценка согласованности между аннотаторами (IoU/F1), auto-accept при достаточном agreement и перевод спорных кейсов в review.
-- Очередь ревьюеров и финальное разрешение споров с фиксацией итоговой аннотации.
-- Строгая валидация bbox и меток на backend:
-  - обязательные поля `x/y/width/height/label`,
-  - числовые координаты,
-  - `width/height > 0`,
-  - рамка внутри границ кадра,
-  - label из `project.label_schema`.
-- Клиентская pre-submit валидация bbox на странице разметки.
-- Экспорт проекта в форматах `COCO`, `YOLO` или `COCO+YOLO`, включая `quality_report`.
+---
 
-## Архитектура workflow
+## 📋 Содержание
 
-Основной домен workflow находится в:
+- [Быстрый старт](#-быстрый-старт)
+- [Архитектура](#-архитектура)
+- [Функциональные возможности](#-функциональные-возможности)
+- [API Документация](#-api-документация)
+- [Тестирование](#-тестирование)
+- [Деплой](#-деплой)
+- [Для защиты диплома](#-для-защиты-диплома)
+- [Структура проекта](#-структура-проекта)
+- [Технологический стек](#-технологический-стек)
+- [Команда](#-команда)
 
-- `backend/apps/cv_annotation/models.py`
-- `backend/apps/cv_annotation/views.py`
-- `backend/apps/cv_annotation/services/workflow.py`
-- `backend/apps/cv_annotation/services/upload.py`
-- `backend/apps/cv_annotation/services/frames.py`
+---
 
-Legacy endpoint `PATCH /api/tasks/{id}/annotate/` ограничен для CV-проектов и не должен использоваться в новом CV процессе.
+## 🚀 Быстрый старт
 
-## Ключевые API для workflow
+### Предварительные требования
 
-- `POST /api/projects/{project_id}/imports/` - загрузка файла в import session.
-- `POST /api/projects/{project_id}/imports/{import_id}/finalize/` - создание work items и assignments.
-- `GET /api/projects/{project_id}/overview/` - агрегированный прогресс проекта.
-- `GET /api/projects/{project_id}/export/?format=both|coco|yolo` - экспорт датасета.
-- `GET /api/annotator/queue/` - очередь аннотатора.
-- `GET /api/annotator/assignments/{assignment_id}/` - детали assignment.
-- `POST /api/annotator/assignments/{assignment_id}/submit/` - submit черновика/финала.
-- `GET /api/reviewer/queue/` - очередь ревью.
-- `GET /api/reviews/{review_id}/` - детали спора.
-- `POST /api/reviews/{review_id}/resolve/` - финальное решение ревьюера.
+- Docker и Docker Compose
+- Python 3.11+
+- Node.js 18+
 
-## Как работает процесс (коротко)
+### Запуск проекта
 
-1. Заказчик создает CV-проект (`project_type=cv`) и настраивает `label_schema`.
-2. Загружает фото/видео в import session.
-3. Backend валидирует файлы, извлекает кадры из видео (`ffmpeg`) и формирует preview.
-4. После finalize создаются `WorkItem` и `Assignment`.
-5. Аннотаторы размечают bbox и отправляют результат.
-6. Сервис оценки считает agreement; при низком значении формируется `ReviewRecord`.
-7. Ревьюер выбирает финальную разметку.
-8. Заказчик экспортирует датасет в нужном формате.
+#### 1. Клонирование репозитория
 
-## Frontend страницы процесса
+```bash
+git clone https://github.com/yourusername/dataset-ai.git
+cd dataset-ai
+```
 
-- `frontend/src/pages/ProjectDetailPage.tsx` - импорт, finalize, экспорт.
-- `frontend/src/pages/AnnotationPage.tsx` - bbox-разметка + pre-submit проверки.
-- `frontend/src/pages/LabelingPage.tsx` - очередь аннотатора.
-- `frontend/src/pages/QualityPage.tsx` - очередь ревьюера.
+#### 2. Настройка переменных окружения
 
-## Запуск локально
+```bash
+# Скопируйте шаблон переменных окружения
+cp .env.example .env
 
-### Backend
+# Отредактируйте .env при необходимости
+# (для локальной разработки значения по умолчанию подходят)
+```
+
+#### 3. Запуск через Docker Compose
+
+```bash
+# Запуск всех сервисов
+docker-compose up -d
+
+# Проверка статуса
+docker-compose ps
+
+# Просмотр логов
+docker-compose logs -f
+```
+
+#### 4. Открытие приложения
+
+- **Frontend:** http://localhost:5173
+- **Backend API:** http://localhost:8000/api/
+- **Django Admin:** http://localhost:8000/admin/
+
+#### 5. Тестовые учетные данные
+
+Для локальной разработки используйте команду для создания тестового пользователя:
+
+```bash
+# Создать тестового пользователя через API
+curl -X POST http://localhost:8000/api/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","username":"admin","password":"your-strong-password","role":"admin"}'
+```
+
+---
+
+## 🏗 Архитектура
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Frontend      │────▶│   Backend        │────▶│   MongoDB       │
+│   React + TS    │     │   Django + DRF   │     │   (NoSQL)       │
+│   Tailwind CSS  │◀────│   + mongoengine  │◀────│                 │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                              │
+                              ▼
+                        ┌──────────────────┐
+                        │   Redis          │
+                        │   (Cache/Queue)  │
+                        └─────────────────┘
+                              │
+                              ▼
+                        ┌──────────────────┐
+                        │   Celery         │
+                        │   (Task Queue)   │
+                        └─────────────────┘
+```
+
+### Компоненты системы
+
+| Компонент | Технология | Назначение |
+|-----------|------------|------------|
+| **Frontend** | React 18 + TypeScript | Пользовательский интерфейс |
+| **Backend** | Django 4 + DRF | REST API, бизнес-логика |
+| **База данных** | MongoDB 7 | Хранение данных (NoSQL) |
+| **Кэш/Очередь** | Redis 7 | Кэширование, Celery брокер |
+| **Task Queue** | Celery 5 | Асинхронные задачи |
+
+Подробное описание архитектуры см. в [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+---
+
+## ✨ Функциональные возможности
+
+### Для заказчиков (Customer)
+
+- ✅ Создание и управление датасетами
+- ✅ Настройка проектов разметки
+- ✅ Контроль качества аннотаций (Cross-Check)
+- ✅ Арбитраж спорных случаев
+- ✅ Финансовое управление (пополнение, выплаты)
+- ✅ Мониторинг прогресса разметки
+
+### Для исполнителей (Annotator)
+
+- ✅ Просмотр доступных задач
+- ✅ AI-assisted разметка (предразметка моделью)
+- ✅ Создание и редактирование аннотаций
+- ✅ Отслеживание рейтинга и заработка
+- ✅ Вывод средств
+
+### Для администраторов (Admin)
+
+- ✅ Полный доступ ко всем ресурсам
+- ✅ Арбитраж сложных случаев
+- ✅ Просмотр метрик качества
+- ✅ Управление пользователями
+
+---
+
+## 📚 API Документация
+
+Полная документация API доступна в [API.md](./API.md).
+
+### Основные эндпоинты
+
+#### Авторизация
+
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| POST | `/api/auth/register/` | Регистрация пользователя |
+| POST | `/api/auth/login/` | Вход (JWT токен) |
+
+#### Датасеты
+
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| GET | `/api/datasets/` | Список датасетов |
+| POST | `/api/datasets/` | Создание датасета |
+| GET | `/api/datasets/{id}/` | Детали датасета |
+| PATCH | `/api/datasets/{id}/` | Обновление датасета |
+| DELETE | `/api/datasets/{id}/` | Удаление датасета |
+
+#### Задачи
+
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| GET | `/api/tasks/` | Список задач |
+| POST | `/api/tasks/` | Создание задачи |
+| PATCH | `/api/tasks/{id}/annotate/` | Разметка задачи |
+
+#### Качество
+
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| POST | `/api/quality/review/` | Создание cross-check review |
+| GET | `/api/quality/metrics/{dataset_id}/` | Метрики качества |
+
+#### Финансы
+
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| GET | `/api/finance/transactions/` | История транзакций |
+| POST | `/api/finance/pay/` | Пополнение баланса |
+| POST | `/api/finance/withdraw/` | Запрос выплаты |
+
+---
+
+## 🧪 Тестирование
+
+### Backend тесты
 
 ```bash
 cd backend

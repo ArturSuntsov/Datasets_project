@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { validationAPI } from "../services/api";
-import { useAuthStore } from "../store";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store";
 
 type DecisionMap = Record<string, { decision: "approve" | "needs_changes"; comment: string }>;
 
@@ -211,6 +211,47 @@ export function QualityPage() {
           </>
         )}
       </div>
+
+      {/* Метрики качества
+      {datasetId && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Метрики качества
+          </h2>
+          {metricsQuery.isLoading ? (
+            <LoadingSpinner />
+          ) : metrics.length === 0 ? (
+            <p className="text-gray-500">Нет метрик для этого датасета</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
+                    <th className="py-3 px-2">Задача</th>
+                    <th className="py-3 px-2">Precision</th>
+                    <th className="py-3 px-2">Recall</th>
+                    <th className="py-3 px-2">F1</th>
+                    <th className="py-3 px-2">Дата</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.map((m: any) => (
+                    <tr key={m.task_id} className="border-b border-gray-100 dark:border-gray-800">
+                      <td className="py-3 px-2 font-mono text-xs">{m.task_id?.slice(0, 8)}...</td>
+                      <td className="py-3 px-2">{m.precision?.toFixed(3)}</td>
+                      <td className="py-3 px-2">{m.recall?.toFixed(3)}</td>
+                      <td className="py-3 px-2 font-semibold">{m.f1?.toFixed(3)}</td>
+                      <td className="py-3 px-2 text-xs text-gray-500">
+                        {m.created_at ? new Date(m.created_at).toLocaleString("ru-RU") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )} */}
     </div>
   );
 }

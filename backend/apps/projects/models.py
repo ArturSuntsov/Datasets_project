@@ -74,6 +74,7 @@ class Project(Document):
 
     meta = {
         "collection": "projects",
+        "strict": False,  # Игнорировать поля, которых нет в модели
         "indexes": [
             "owner",
             "status",
@@ -139,6 +140,10 @@ class Task(Document):
     project = ReferenceField(Project, null=True, reverse_delete_rule=CASCADE)
     dataset = ReferenceField(Dataset, required=True, reverse_delete_rule=CASCADE)
     annotator = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+
+    title = StringField(required=True, max_length=500, default="Task")
+
+    # Active Learning: чем выше difficulty_score, тем раньше задача будет выбрана.
     difficulty_score = FloatField(required=True, default=0.5, min_value=0)
     status = StringField(required=True, choices=[c[0] for c in STATUS_CHOICES], default=STATUS_PENDING)
     deadline_at = DateTimeField(null=True)
@@ -148,6 +153,7 @@ class Task(Document):
 
     meta = {
         "collection": "tasks",
+        "strict": False,  # Игнорировать поля, которых нет в модели (для обратной совместимости)
         "indexes": [
             "status",
             ("difficulty_score", "-difficulty_score"),

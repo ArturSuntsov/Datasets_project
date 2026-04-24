@@ -22,17 +22,44 @@ export function FinancePage() {
 
   const payMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.pay(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    onSuccess: () => {
+      console.log("✅ Пополнение успешно");
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка пополнения:", error);
+      alert("Ошибка пополнения: " + (error as Error).message);
+    },
   });
 
   const withdrawMutation = useMutation({
     mutationFn: (body: PaymentRequestBody) => financeAPI.withdraw(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    onSuccess: () => {
+      console.log("✅ Вывод успешен");
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка вывода:", error);
+      alert("Ошибка вывода: " + (error as Error).message);
+    },
   });
 
   const transferMutation = useMutation({
-    mutationFn: (body: TransferRequest) => financeAPI.transfer(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] }),
+    mutationFn: (body: TransferRequest) => {
+      console.log("📤 Отправка перевода:", body);
+      return financeAPI.transfer(body);
+    },
+    onSuccess: (data) => {
+      console.log("✅ Перевод успешен:", data);
+      queryClient.invalidateQueries({ queryKey: ["finance-transactions", user?.id] });
+      alert("Перевод выполнен успешно!");
+      // Очистка формы
+      setTransferForm({ amount: "10", currency: "USD", description: "" });
+    },
+    onError: (error) => {
+      console.error("❌ Ошибка перевода:", error);
+      alert("Ошибка перевода: " + (error as Error).message);
+    },
   });
 
   const [payForm, setPayForm] = React.useState<PaymentRequestBody>({ amount: "10", currency: "USD", description: "" });
@@ -62,6 +89,25 @@ export function FinancePage() {
     return badges[status] || "badge-secondary";
   };
 
+  // ✅ Обработчик отправки перевода
+  const handleTransfer = () => {
+    console.log("🖱️ Кнопка нажата, transferForm:", transferForm);
+    
+    // Проверка, что указан получатель
+    if (!transferForm.to_username && !transferForm.to_email && !transferForm.to_user_id) {
+      alert("Укажите username или email получателя");
+      return;
+    }
+    
+    // Проверка суммы
+    if (!transferForm.amount || Number(transferForm.amount) <= 0) {
+      alert("Укажите сумму больше 0");
+      return;
+    }
+    
+    transferMutation.mutate(transferForm);
+  };
+
   return (
     <div className="space-y-6">
       {/* Заголовок */}
@@ -75,10 +121,10 @@ export function FinancePage() {
       {/* Вкладки */}
       <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
         {[
-          { id: "history", label: "📋 История", icon: "📋" },
-          { id: "pay", label: "💳 Пополнить", icon: "💳" },
-          { id: "withdraw", label: "💸 Вывести", icon: "💸" },
-          { id: "transfer", label: "🔄 Перевод", icon: "🔄" },
+          { id: "history", label: "📋 История" },
+          { id: "pay", label: "💳 Пополнить" },
+          { id: "withdraw", label: "💸 Вывести" },
+          { id: "transfer", label: "🔄 Перевод" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -125,7 +171,7 @@ export function FinancePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={payForm.description || ""}
@@ -176,7 +222,7 @@ export function FinancePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={withdrawForm.description || ""}
@@ -197,7 +243,7 @@ export function FinancePage() {
         </div>
       )}
 
-      {/* Форма перевода */}
+      {/* ✅ Форма перевода — ИСПРАВЛЕНА */}
       {activeTab === "transfer" && (
         <div className="card max-w-md">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">🔄 Перевод пользователю</h2>
@@ -211,30 +257,20 @@ export function FinancePage() {
                 value={transferForm.to_username || transferForm.to_email || ""}
                 onChange={(e) => {
                   const value = e.target.value;
+                  console.log("📝 Ввод получателя:", value);
                   if (value.includes("@")) {
-                    setTransferForm((s) => ({ 
-                      ...s, 
-                      to_email: value, 
-                      to_username: undefined, 
-                      to_user_id: undefined 
-                    }));
+                    setTransferForm((s) => ({ ...s, to_email: value, to_username: undefined, to_user_id: undefined }));
                   } else {
-                    setTransferForm((s) => ({ 
-                      ...s, 
-                      to_username: value, 
-                      to_email: undefined, 
-                      to_user_id: undefined 
-                    }));
+                    setTransferForm((s) => ({ ...s, to_username: value, to_email: undefined, to_user_id: undefined }));
                   }
                 }}
                 className="input-field"
-                placeholder="customer@test.com  или  annotator"
+                placeholder="customer@test.com или annotator"
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Можно ввести email или username получателя
               </p>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Сумма</label>
               <input
@@ -242,14 +278,16 @@ export function FinancePage() {
                 step="0.01"
                 min="0.01"
                 value={transferForm.amount}
-                onChange={(e) => setTransferForm((s) => ({ ...s, amount: e.target.value }))}
+                onChange={(e) => {
+                  console.log("📝 Ввод суммы:", e.target.value);
+                  setTransferForm((s) => ({ ...s, amount: e.target.value }));
+                }}
                 className="input-field"
                 placeholder="25.00"
               />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание (опционально)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Описание</label>
               <input
                 type="text"
                 value={transferForm.description || ""}
@@ -258,11 +296,10 @@ export function FinancePage() {
                 placeholder="Оплата за разметку"
               />
             </div>
-
             <button
               type="button"
               disabled={transferMutation.isPending}
-              onClick={() => transferMutation.mutate(transferForm)}
+              onClick={handleTransfer}
               className="btn-primary w-full bg-green-600 hover:bg-green-700"
             >
               {transferMutation.isPending ? <LoadingSpinner size="sm" /> : "🔄 Отправить перевод"}

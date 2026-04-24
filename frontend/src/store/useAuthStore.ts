@@ -10,10 +10,12 @@ type AuthState = {
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
+
   login: (body: LoginRequest) => Promise<void>;
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => void;
   loadMe: () => Promise<void>;
+  setUser: (user: User | null) => void;  // ✅ Новый метод
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -23,6 +25,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: !!getAccessToken(),
   loading: false,
   error: null,
+
   login: async (body) => {
     set({ loading: true, error: null });
     queryClient.clear();
@@ -37,7 +40,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       loading: false,
     });
   },
+
   register: async (body) => {
+    console.log('📦 [useAuthStore.register] Начало регистрации:', { email: body.email, username: body.username });
     set({ loading: true, error: null });
     try {
       const res: AuthResponse = await authAPI.register(body);
@@ -47,6 +52,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         username: (res as any).username ?? body.username,
         role: (res as any).role ?? body.role ?? "customer",
       };
+      
+      console.log('📦 [useAuthStore.register] Регистрация успешна:', { userId: user.id });
+
       if (res.access) {
         setTokens(res.access, res.refresh ?? getRefreshToken());
       }
@@ -59,11 +67,18 @@ export const useAuthStore = create<AuthState>((set) => ({
         loading: false,
         error: null,
       });
+      console.log('📦 [useAuthStore.register] Состояние обновлено:', { user: user.email, isAuthenticated: true });
     } catch (e) {
-      set({ loading: false, error: e instanceof Error ? e.message : "Registration failed" });
+      console.error('📦 [useAuthStore.register] Ошибка регистрации:', e);
+      set({
+        loading: false,
+        error: e instanceof Error ? e.message : 'Ошибка регистрации',
+      });
       throw e;
     }
   },
+
+  // ✅ ИСПРАВЛЕНО: очистка кэша React Query при выходе
   logout: () => {
     clearTokens();
     queryClient.clear();
@@ -75,6 +90,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       error: null,
     });
   },
+
   loadMe: async () => {
     set({ loading: true, error: null });
     try {
@@ -94,4 +110,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
     }
   },
+
+  // ✅ Новый метод для обновления пользователя
+  setUser: (user) => set({ user }),
 }));

@@ -43,7 +43,7 @@ class Dataset(Document):
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
-    meta = {"collection": "datasets"}
+    meta = {"collection": "datasets", "strict": False}
 
     def save(self, *args, **kwargs):
         self.updated_at = datetime.utcnow()

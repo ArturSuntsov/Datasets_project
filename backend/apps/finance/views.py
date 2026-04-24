@@ -98,14 +98,14 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
 
         data = dict(request.data)
         
-        # Получаем идентификатор получателя (может быть id, username или email)
+        # ✅ ИСПРАВЛЕНО: получаем идентификатор получателя (может быть id, username или email)
         to_identifier = data.get("to_username") or data.get("to_email") or data.get("to_user_id")
         amount_str = data.get("amount")
         description = data.get("description", "")
-        
+
         if not to_identifier:
             return Response(
-                {"detail": "Укажите username, email или ID получателя"}, 
+                {"detail": "Укажите username, email или ID получателя"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -113,16 +113,16 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
             amount = Decimal(amount_str)
             if amount <= 0:
                 return Response(
-                    {"detail": "Сумма должна быть > 0"}, 
+                    {"detail": "Сумма должна быть > 0"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         except:
             return Response(
-                {"detail": "Неверная сумма"}, 
+                {"detail": "Неверная сумма"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Ищем получателя по username, email или ID
+        # ✅ ИСПРАВЛЕНО: ищем получателя по username, email или ID
         to_user = None
         
         # Сначала пробуем найти по ID (если передан ObjectId)
@@ -139,20 +139,20 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
         
         if not to_user:
             return Response(
-                {"detail": f"Пользователь '{to_identifier}' не найден"}, 
+                {"detail": f"Пользователь '{to_identifier}' не найден"},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Нельзя переводить самому себе
+        # ✅ Нельзя переводить самому себе
         if str(to_user.id) == str(user.id):
             return Response(
-                {"detail": "Нельзя перевести деньги самому себе"}, 
+                {"detail": "Нельзя перевести деньги самому себе"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if user.balance < amount:
             return Response(
-                {"detail": "Недостаточно средств"}, 
+                {"detail": "Недостаточно средств"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -204,10 +204,7 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
             if ObjectId.is_valid(task_id):
                 task = Task.objects(id=ObjectId(task_id)).first()
                 if not task:
-                    return Response(
-                        {"detail": "task_id not found"}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                    return Response({"detail": "task_id not found"}, status=status.HTTP_400_BAD_REQUEST)
 
         if payment_type == PaymentRequest.PAYMENT_PAY:
             tx_type = Transaction.TYPE_PAYMENT
@@ -223,10 +220,7 @@ class PaymentViewSet(JWTRequiredMixin, ViewSet):
             desc = description or "Вывод средств"
             
             if user.balance < amount:
-                return Response(
-                    {"detail": "Недостаточно средств"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"detail": "Недостаточно средств"}, status=status.HTTP_400_BAD_REQUEST)
 
         tx = Transaction(
             user=user,

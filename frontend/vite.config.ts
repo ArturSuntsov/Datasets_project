@@ -12,9 +12,9 @@ import path from "path";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
-  // Для Docker: host.docker.internal — это хост машина Windows
-  // Для локальной разработки: localhost
-  const apiUrl = env.VITE_API_URL || "http://host.docker.internal:8000";
+  // Для Docker: используем имя сервиса 'web' (внутренняя Docker сеть)
+  // Для локальной разработки: http://localhost:8001
+  const apiUrl = env.VITE_API_URL || "http://web:8000";
 
   console.log(`🔧 Vite Proxy: /api → ${apiUrl}`);
 
@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
       port: 3000,  // Порт frontend
       host: true,  // Доступ из Docker сети
       proxy: {
-        '/api': {
+        "/api": {
           target: apiUrl,
           changeOrigin: true,
           secure: false,

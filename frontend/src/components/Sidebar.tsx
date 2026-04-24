@@ -10,19 +10,20 @@ type NavItem = {
 };
 
 const items: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: "📊", roles: ["customer", "annotator", "admin"] },
-  { to: "/projects", label: "Projects", icon: "📁", roles: ["customer", "admin"] },
-  { to: "/datasets", label: "Datasets", icon: "🗂️", roles: ["annotator", "admin"] },
-  { to: "/tasks", label: "Tasks", icon: "✅", roles: ["customer", "admin"] },
-  { to: "/labeling", label: "Annotation", icon: "🏷️", roles: ["annotator", "admin"] },
-  { to: "/quality", label: "Quality", icon: "⭐", roles: ["customer", "admin"] },
-  { to: "/finance", label: "Finance", icon: "💰", roles: ["customer", "annotator", "admin"] },
-  { to: "/profile", label: "Profile", icon: "👤", roles: ["customer", "annotator", "admin"] },
+  { to: "/", label: "Дашборд", icon: "📊", roles: ["customer", "annotator", "admin"] },
+  { to: "/projects", label: "Проекты", icon: "📁", roles: ["customer", "admin"] },
+  { to: "/datasets", label: "Датасеты", icon: "🗂️", roles: ["annotator", "admin"] },
+  { to: "/tasks", label: "Задачи", icon: "✅", roles: ["customer", "admin"] },
+  { to: "/labeling", label: "Разметка", icon: "🏷️", roles: ["annotator", "admin"] },
+  { to: "/quality", label: "Качество", icon: "⭐", roles: ["customer", "admin"] },
+  { to: "/finance", label: "Финансы", icon: "💰", roles: ["customer", "annotator", "admin"] },
+  { to: "/profile", label: "Профиль", icon: "👤", roles: ["customer", "annotator", "admin"] },
 ];
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
-  const availableItems = items.filter((item) => (user?.role ? item.roles.includes(user.role) : false));
+  const role = user?.role;
+  const visibleItems = items.filter((item) => !role || item.roles.includes(role));
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-full w-72 min-w-[280px] flex-col border-r border-gray-200 bg-white transition-colors duration-300 dark:border-gray-700 dark:bg-gray-800">
@@ -37,8 +38,8 @@ export function Sidebar() {
         </NavLink>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-6">
-        {availableItems.map((item) => (
+      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
+        {visibleItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

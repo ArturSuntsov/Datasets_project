@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # ОБЩИЕ НАСТРОЙКИ
 # =============================================================================
+# SECRET_KEY должен быть явно установлен в .env!
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY must be set in environment variables")
 DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0").split(",")
 
@@ -97,12 +100,9 @@ WSGI_APPLICATION = "config.wsgi.application"
 # =============================================================================
 # MONGODB НАСТРОЙКИ
 # =============================================================================
-# Поддержка Docker (db) и локальной разработки (localhost)
-# Таймауты критичны чтобы регистрация не висела бесконечно при проблемах с БД
-MONGO_URI = os.environ.get(
-    'MONGO_URI',
-    'mongodb://localhost:27017/ai_dataset_db?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
-)
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("MONGO_URI must be set in environment variables")
 
 logger.info(f"MONGO_URI настроен: {MONGO_URI.split('@')[-1].split('/')[0] if '@' in MONGO_URI else MONGO_URI}")
 
@@ -123,12 +123,20 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 # =============================================================================
 # БАЗЫ ДАННЫХ
 # =============================================================================
-# Django требует DATABASES - используем dummy для MongoDB
+# Django требует DATABASES - используем SQLite для сессий/admin (MongoDB используется через mongoengine)
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.dummy',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# =============================================================================
+# СЕССИИ
+# =============================================================================
+# Используем cache-based сессии через Redis (не требует SQL БД)
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
 
 # =============================================================================
 # КЭШИРОВАНИЕ

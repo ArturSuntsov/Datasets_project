@@ -66,7 +66,7 @@ export function setTokens(accessToken: string, refreshToken?: string | null) {
       localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     }
   } catch {
-    // ignore storage errors in browser-limited environments
+    // ignore
   }
 }
 
@@ -75,16 +75,49 @@ export function clearTokens() {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   } catch {
-    // noop
+    // ignore
   }
 }
 
+function normalizeApiBaseUrl(): string {
+  return "";
+}
+
+const apiBaseUrl = normalizeApiBaseUrl();
+
 export const api: AxiosInstance = axios.create({
-  baseURL: "",
+  baseURL: apiBaseUrl,
   timeout: 30000,
 });
 
+const refreshClient: AxiosInstance = axios.create({
+  baseURL: apiBaseUrl,
+  timeout: 30000,
+});
+
+type RetriableConfig = AxiosRequestConfig & { _retry?: boolean };
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  const payload = refreshToken ? { refresh: refreshToken } : {};
+  try {
+    const res = await refreshClient.post<AuthResponse>("/api/auth/token/refresh/", payload, {
+      headers: { "Content-Type": "application/json" },
+    });
+    const access = res.data.access;
+    const nextRefresh = res.data.refresh;
+    if (access) {
+      setTokens(access, nextRefresh ?? refreshToken);
+      return access;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 api.interceptors.request.use((config) => {
+  console.log('🔵 Axios Request:', config.method?.toUpperCase(), config.url);
   const token = getAccessToken();
   if (token) {
     config.headers = config.headers ?? {};
@@ -94,10 +127,25 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
-  (error: AxiosError<ApiErrorResponse>) => {
-    if (error.response?.status === 401) {
-      clearTokens();
+  (response) => {
+    console.log('🟢 Axios Response:', response.config.method?.toUpperCase(), response.config.url, response.status);
+    return response;
+  },
+  async (error: AxiosError<ApiErrorResponse>) => {
+    console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
+    if (!isAxiosError(error)) return Promise.reject(error);
+    const { response, config } = error;
+    if (!response || !config) return Promise.reject(error);
+    const status = response.status;
+    const retriableConfig = config as RetriableConfig;
+    if (status === 401 && !retriableConfig._retry) {
+      retriableConfig._retry = true;
+      const nextAccess = await refreshAccessToken();
+      if (nextAccess) {
+        retriableConfig.headers = retriableConfig.headers ?? {};
+        retriableConfig.headers.Authorization = `Bearer ${nextAccess}`;
+        return api.request(retriableConfig);
+      }
     }
     return Promise.reject(error);
   }
@@ -105,11 +153,12 @@ api.interceptors.response.use(
 
 function extractDetail(err: unknown): string {
   if (isAxiosError(err)) {
-    return (err.response?.data?.detail as string | undefined) ?? (err.response?.data?.error as string | undefined) ?? err.message;
+    return err.response?.data?.detail ?? err.message;
   }
-  return err instanceof Error ? err.message : "Unknown error";
+  return "Unknown error";
 }
 
+// ------------------ Auth API ------------------
 export const authAPI = {
   async login(body: LoginRequest): Promise<AuthResponse> {
     const res = await api.post<AuthResponse>("/api/auth/login/", body);
@@ -300,6 +349,7 @@ export const datasetsAPI = {
   },
 };
 
+// ------------------ Tasks API ------------------
 export const tasksAPI = {
   async create(body: Record<string, unknown>): Promise<Task> {
     const res = await api.post<Task>("/api/tasks/", body);
@@ -319,17 +369,22 @@ export const tasksAPI = {
   },
 };
 
+// ------------------ Quality API ------------------
 export const qualityAPI = {
   async createReview(body: QualityReviewRequest): Promise<Record<string, unknown>> {
     const res = await api.post<Record<string, unknown>>("/api/quality/review/", body);
     return res.data;
   },
   async metrics(datasetId: string, params?: { limit?: number; offset?: number }): Promise<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }> {
-    const res = await api.get<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }>(`/api/quality/metrics/${datasetId}/`, { params });
+    const res = await api.get<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }>(
+      `/api/quality/metrics/${datasetId}/`,
+      { params }
+    );
     return res.data;
   },
 };
 
+// ------------------ Finance API ------------------
 export const financeAPI = {
   async transactions(params?: { limit?: number; offset?: number; status?: string }): Promise<ApiListResponse<Transaction>> {
     const res = await api.get<ApiListResponse<Transaction>>("/api/finance/transactions/", { params });
@@ -347,7 +402,6 @@ export const financeAPI = {
   },
   
   async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
-  // Отправляем то, что заполнил пользователь
     const payload: Record<string, unknown> = {
       amount: body.amount,
       currency: body.currency || "USD",
@@ -366,6 +420,61 @@ export const financeAPI = {
     return res.data;
   },
 };
+
+
+// ------------------ Users API (массовое создание + аватар) ------------------
+export const usersAPI = {
+  async bulkCreateAnnotators(file: File, groups: string, specialization?: string, experienceLevel?: string): Promise<Blob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('groups', groups);
+    if (specialization) formData.append('specialization', specialization);
+    if (experienceLevel) formData.append('experience_level', experienceLevel);
+    
+    const res = await api.post<Blob>('/api/users/bulk-create-annotators/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+
+  // ✅ Загрузка аватарки
+  async uploadAvatar(file: File): Promise<{ avatar_url: string; message: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const res = await api.post<{ avatar_url: string; message: string }>(
+      '/api/users/me/avatar/',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    return res.data;
+  },
+
+  // ✅ Удаление аватарки
+  async deleteAvatar(): Promise<{ message: string }> {
+    const res = await api.delete<{ message: string }>('/api/users/me/avatar/delete/');
+    return res.data;
+  },
+};
+
+// // ------------------ Stats API ------------------
+// export const statsAPI = {
+//   async myStats(): Promise<UserStats> {
+//     const res = await api.get<UserStats>("/api/users/me/stats/");
+//     return res.data;
+//   },
+// };
+
+// // ------------------ Leaderboard API ------------------
+// export const leaderboardAPI = {
+//   async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
+//     const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
+//     return res.data;
+//   },
+// };
 
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));

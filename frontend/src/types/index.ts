@@ -1,4 +1,4 @@
-export type Role = "customer" | "annotator" | "reviewer" | "admin";
+export type Role = "customer" | "annotator" | "admin";
 
 export interface User {
   id: string;
@@ -6,11 +6,12 @@ export interface User {
   username: string;
   role: Role;
   rating?: number;
-
+  balance?: string;
   specialization?: string;
   group_name?: string;
+  groups?: string[];
   experience_level?: string;
-  balance?: string; // DecimalField чаще отдаётся строкой (MVP)
+  avatar_url?: string | null;  // ✅ Аватар (data URL)
 }
 
 export type DatasetStatus = "draft" | "active" | "archived";
@@ -44,7 +45,6 @@ export interface Task {
 }
 
 export type AnnotationStatus = "draft" | "submitted" | "pending_review" | "accepted" | "rejected";
-
 export type AnnotationFormat = "classification_v1" | "ner_v1" | "generic_v1";
 
 export interface Annotation {
@@ -61,6 +61,7 @@ export interface Annotation {
   updated_at?: string;
 }
 
+// ✅ ИСПРАВЛЕНО: добавлен "transfer"
 export type TransactionType = "payment" | "payout" | "earnings" | "transfer";
 export type TransactionStatus = "pending" | "completed" | "failed" | "reversed";
 
@@ -69,11 +70,11 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   user_id: string;
-  from_user_id?: string | null;      // ← Новое поле
-  to_user_id?: string | null;        // ← Новое поле
-  from_user_name?: string | null;    // ← Новое поле
-  to_user_name?: string | null;      // ← Новое поле
-  description?: string;              // ← Новое поле
+  from_user_id?: string | null;
+  to_user_id?: string | null;
+  from_user_name?: string | null;
+  to_user_name?: string | null;
+  description?: string;
   task_id?: string | null;
   amount: string;
   currency: string;
@@ -82,10 +83,11 @@ export interface Transaction {
   created_at?: string;
 }
 
+// ✅ ИСПРАВЛЕНО: добавлены поля для перевода по username/email
 export interface TransferRequest {
-  to_user_id?: string;      // опционально (можно не использовать)
-  to_username?: string;     // ← новое поле
-  to_email?: string;        // ← новое поле
+  to_user_id?: string;
+  to_username?: string;
+  to_email?: string;
   amount: string | number;
   currency?: string;
   description?: string;
@@ -93,7 +95,6 @@ export interface TransferRequest {
 
 export interface ApiErrorResponse {
   detail?: string;
-  error?: string;
   [key: string]: unknown;
 }
 
@@ -102,6 +103,21 @@ export interface ApiListResponse<T> {
   limit?: number;
   offset?: number;
   total?: number;
+}
+
+// ------------------ Auth ------------------
+export interface LoginRequest {
+  email?: string;
+  username?: string;
+  identifier: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  username: string;
+  password: string;
+  role?: Role;
 }
 
 export interface AuthResponse {
@@ -115,18 +131,7 @@ export interface AuthResponse {
   ok?: boolean;
 }
 
-export interface LoginRequest {
-  identifier: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  email: string;
-  username: string;
-  password: string;
-  role?: Role;
-}
-
+// ------------------ Dataset ------------------
 export interface DatasetCreateRequest {
   name: string;
   description?: string;
@@ -138,6 +143,7 @@ export interface DatasetCreateRequest {
 
 export interface DatasetUpdateRequest extends Partial<DatasetCreateRequest> {}
 
+// ------------------ Task / Labeling ------------------
 export interface TaskFilters {
   status?: TaskStatus;
   limit?: number;
@@ -585,6 +591,7 @@ export interface AnnotateRequest {
   input_context?: Record<string, unknown>;
 }
 
+// ------------------ Quality ------------------
 export interface QualityReviewRequest {
   task_id: string;
   annotation_a_id: string;
@@ -603,6 +610,7 @@ export interface QualityMetricsItem {
   created_at?: string;
 }
 
+// ------------------ Finance ------------------
 export interface TransactionFilters {
   status?: TransactionStatus;
   limit?: number;
@@ -615,4 +623,37 @@ export interface PaymentRequestBody {
   task_id?: string | null;
   description?: string;
   metadata?: Record<string, unknown>;
+}
+
+// ------------------ Stats ------------------
+export interface UserStats {
+  rating: number;
+  level: "novice" | "intermediate" | "advanced" | "expert";
+  level_label: string;
+  level_color: string;
+  completed_tasks: number;
+  total_annotations: number;
+  average_f1: number;
+  reviews_count: number;
+  balance: string;
+  next_level_rating: number;
+}
+
+// ------------------ Leaderboard ------------------
+export interface LeaderboardEntry {
+  position: number;
+  user_id: string;
+  username: string;
+  email: string;
+  rating: number;
+  completed_tasks: number;
+  unique_tasks: number;
+  total_annotations: number;
+  average_f1: number;
+}
+
+export interface LeaderboardResponse {
+  leaderboard: LeaderboardEntry[];
+  current_user: LeaderboardEntry | null;
+  total_participants: number;
 }

@@ -1,120 +1,128 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { reviewerAPI } from "../services/api";
-import { BoundingBox } from "../types";
-import { useAuthStore } from "../store";
+import { qualityAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store";
 
 export function QualityPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
-  const [resolutionJson, setResolutionJson] = useState<string>(JSON.stringify({ boxes: [] }, null, 2));
+  const [datasetId, setDatasetId] = useState<string>("");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  const queueQuery = useQuery({
-    queryKey: ["reviewer-queue"],
-    queryFn: () => reviewerAPI.queue(),
-    enabled: user?.role === "reviewer" || user?.role === "admin",
+  // Получаем список датасетов (через quality API нет, используем заглушку)
+  const datasetsQuery = useQuery({
+    queryKey: ["quality-datasets"],
+    queryFn: async () => {
+      // Можно заменить на реальный запрос к datasetsAPI
+      const res = await fetch("/api/datasets/", {
+        headers: { Authorization: `Bearer ${localStorage.getItem("dataset_ai_access_token")}` }
+      });
+      return res.json();
+    },
+    enabled: user?.role === "customer" || user?.role === "admin",
   });
 
-  useEffect(() => {
-    if (!selectedReviewId && queueQuery.data?.items?.length) {
-      setSelectedReviewId(queueQuery.data.items[0].review_id);
-    }
-  }, [queueQuery.data, selectedReviewId]);
-
-  const reviewDetailQuery = useQuery({
-    queryKey: ["review-detail", selectedReviewId],
-    queryFn: () => reviewerAPI.detail(selectedReviewId!),
-    enabled: !!selectedReviewId,
+  const metricsQuery = useQuery({
+    queryKey: ["quality-metrics", datasetId],
+    queryFn: () => qualityAPI.metrics(datasetId),
+    enabled: !!datasetId,
   });
 
-  useEffect(() => {
-    if (reviewDetailQuery.data?.resolution) {
-      setResolutionJson(JSON.stringify(reviewDetailQuery.data.resolution, null, 2));
-    }
-  }, [reviewDetailQuery.data?.resolution]);
-
-  const resolveMutation = useMutation({
-    mutationFn: async () => reviewerAPI.resolve(selectedReviewId!, { resolution: JSON.parse(resolutionJson) }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["reviewer-queue"] });
-      await queryClient.invalidateQueries({ queryKey: ["review-detail", selectedReviewId] });
+  const createReviewMutation = useMutation({
+    mutationFn: (body: any) => qualityAPI.createReview(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["quality-metrics", datasetId] });
+      alert("Review created successfully!");
     },
   });
 
-  if (user?.role !== "reviewer" && user?.role !== "admin") {
+  if (user?.role !== "customer" && user?.role !== "admin") {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Review Queue</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Project owners can monitor quality from each project page. Review resolution is available to reviewers and admins.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          Контроль качества
+        </h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Этот раздел доступен только заказчикам и администраторам.
+        </p>
       </div>
     );
   }
 
-  const items = queueQuery.data?.items ?? [];
+  const datasets = (datasetsQuery.data as any)?.items ?? [];
+  const metrics = (metricsQuery.data as any)?.items ?? [];
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+    <div className="space-y-6">
       <div className="card">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reviewer Queue</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Resolve low-agreement tasks and produce the final annotation.</p>
-        {queueQuery.isLoading ? (
-          <div className="mt-6 flex justify-center"><LoadingSpinner size="lg" /></div>
-        ) : items.length === 0 ? (
-          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">No disputed tasks right now.</div>
-        ) : (
-          <div className="mt-6 space-y-3">
-            {items.map((item) => (
-              <button
-                key={item.review_id}
-                type="button"
-                onClick={() => setSelectedReviewId(item.review_id)}
-                className={`w-full rounded-lg border p-4 text-left transition ${selectedReviewId === item.review_id ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"}`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.project_title}</div>
-                    <div className="mt-2 font-semibold text-gray-900 dark:text-white">Review {item.review_id.slice(0, 8)}</div>
-                  </div>
-                  <span className="badge badge-warning">agreement {item.agreement_score.toFixed(2)}</span>
-                </div>
-                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">{item.annotations.length} submissions · F1 {Number(item.metrics.f1 || 0).toFixed(2)}</div>
-              </button>
-            ))}
-          </div>
-        )}
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          📊 Контроль качества
+        </h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Просмотр метрик качества и создание проверок разметки.
+        </p>
       </div>
 
-      <div className="card space-y-4">
-        {!selectedReviewId || !reviewDetailQuery.data ? (
-          <div className="text-sm text-gray-500 dark:text-gray-400">Select a review from the queue to inspect annotations and resolve the dispute.</div>
-        ) : (
-          <>
-            <div>
-              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{reviewDetailQuery.data.project_title}</div>
-              <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Resolve review {reviewDetailQuery.data.review_id.slice(0, 8)}</h2>
-            </div>
-            <img src={reviewDetailQuery.data.frame_url} alt="Frame under review" className="max-h-[420px] rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {reviewDetailQuery.data.annotations.map((annotation) => (
-                <div key={annotation.annotation_id} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
-                  <div className="font-medium text-gray-900 dark:text-white">{annotation.annotator_username}</div>
-                  <pre className="mt-3 max-h-48 overflow-auto text-xs text-gray-700 dark:text-gray-300">{JSON.stringify(annotation.label_data, null, 2)}</pre>
-                  {annotation.comment ? <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{annotation.comment}</div> : null}
-                </div>
-              ))}
-            </div>
-            <div>
-              <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Final resolution JSON</div>
-              <textarea className="input-field min-h-[220px] font-mono text-xs" value={resolutionJson} onChange={(event) => setResolutionJson(event.target.value)} />
-            </div>
-            <button className="btn-primary" type="button" onClick={() => resolveMutation.mutate()} disabled={resolveMutation.isPending}>
-              {resolveMutation.isPending ? "Resolving..." : "Resolve review"}
-            </button>
-          </>
-        )}
+      {/* Выбор датасета */}
+      <div className="card">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Выберите датасет
+        </label>
+        <select
+          value={datasetId}
+          onChange={(e) => setDatasetId(e.target.value)}
+          className="input-field"
+        >
+          <option value="">— Выберите датасет —</option>
+          {datasets.map((ds: any) => (
+            <option key={ds.id} value={ds.id}>
+              {ds.name}
+            </option>
+          ))}
+        </select>
       </div>
+
+      {/* Метрики качества */}
+      {datasetId && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Метрики качества
+          </h2>
+          {metricsQuery.isLoading ? (
+            <LoadingSpinner />
+          ) : metrics.length === 0 ? (
+            <p className="text-gray-500">Нет метрик для этого датасета</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
+                    <th className="py-3 px-2">Задача</th>
+                    <th className="py-3 px-2">Precision</th>
+                    <th className="py-3 px-2">Recall</th>
+                    <th className="py-3 px-2">F1</th>
+                    <th className="py-3 px-2">Дата</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.map((m: any) => (
+                    <tr key={m.task_id} className="border-b border-gray-100 dark:border-gray-800">
+                      <td className="py-3 px-2 font-mono text-xs">{m.task_id?.slice(0, 8)}...</td>
+                      <td className="py-3 px-2">{m.precision?.toFixed(3)}</td>
+                      <td className="py-3 px-2">{m.recall?.toFixed(3)}</td>
+                      <td className="py-3 px-2 font-semibold">{m.f1?.toFixed(3)}</td>
+                      <td className="py-3 px-2 text-xs text-gray-500">
+                        {m.created_at ? new Date(m.created_at).toLocaleString("ru-RU") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

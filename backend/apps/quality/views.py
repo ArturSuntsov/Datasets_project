@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from bson import ObjectId
 from django.http import HttpRequest
+from mongoengine import ValidationError as MongoValidationError
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet

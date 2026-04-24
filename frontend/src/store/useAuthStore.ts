@@ -18,6 +18,7 @@ type AuthState = {
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => void;
   loadMe: () => Promise<void>;
+  setUser: (user: User | null) => void;  // ✅ Новый метод
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -110,4 +111,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
     }
   },
+
+  // ✅ Новый метод для обновления пользователя
+  setUser: (user) => set({ user }),
 }));

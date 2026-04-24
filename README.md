@@ -72,10 +72,13 @@ docker-compose logs -f
 
 #### 5. Тестовые учетные данные
 
-```
-Email: admin@example.com
-Пароль: admin123
-Роль: admin
+Для локальной разработки используйте команду для создания тестового пользователя:
+
+```bash
+# Создать тестового пользователя через API
+curl -X POST http://localhost:8000/api/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","username":"admin","password":"your-strong-password","role":"admin"}'
 ```
 
 ---

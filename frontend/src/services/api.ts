@@ -199,7 +199,7 @@ export const qualityAPI = {
   },
 };
 
-// ------------------ Finance API (✅ ИСПРАВЛЕНО) ------------------
+// ------------------ Finance API ------------------
 export const financeAPI = {
   async transactions(params?: { limit?: number; offset?: number; status?: string }): Promise<ApiListResponse<Transaction>> {
     const res = await api.get<ApiListResponse<Transaction>>("/api/finance/transactions/", { params });
@@ -216,7 +216,6 @@ export const financeAPI = {
     return res.data;
   },
   
-  // ✅ ИСПРАВЛЕНО: поддержка to_username и to_email
   async transfer(body: TransferRequest): Promise<Record<string, unknown>> {
     const payload: Record<string, unknown> = {
       amount: body.amount,
@@ -233,6 +232,152 @@ export const financeAPI = {
     }
     
     const res = await api.post<Record<string, unknown>>("/api/finance/payments/transfer/", payload);
+    return res.data;
+  },
+};
+
+// ------------------ Annotator API (восстановлено) ------------------
+export const annotatorAPI = {
+  async queue(): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/tasks/", { 
+      params: { status: "in_progress", limit: 50 } 
+    });
+    return res.data;
+  },
+  async detail(assignmentId: string): Promise<any> {
+    const res = await api.get<any>(`/api/tasks/${assignmentId}/`);
+    return res.data;
+  },
+  async submit(assignmentId: string, body: any): Promise<any> {
+    const res = await api.patch<any>(`/api/tasks/${assignmentId}/annotate/`, body);
+    return res.data;
+  },
+};
+
+// ------------------ Reviewer API (восстановлено) ------------------
+export const reviewerAPI = {
+  async queue(): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/quality/review/");
+    return res.data;
+  },
+  async detail(reviewId: string): Promise<any> {
+    const res = await api.get<any>(`/api/quality/review/${reviewId}/`);
+    return res.data;
+  },
+  async resolve(reviewId: string, body: { resolution: any; comment?: string }): Promise<any> {
+    const res = await api.post<any>(`/api/quality/review/${reviewId}/resolve/`, body);
+    return res.data;
+  },
+};
+
+// ------------------ Participants API (восстановлено) ------------------
+export const participantsAPI = {
+  async list(role?: "annotator" | "reviewer"): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/users/participants/", { 
+      params: role ? { role } : undefined 
+    });
+    return res.data;
+  },
+};
+
+// ------------------ Projects API (восстановлено) ------------------
+export const projectsAPI = {
+  async create(body: any): Promise<any> {
+    const res = await api.post<any>("/api/projects/", body);
+    return res.data;
+  },
+  async list(params?: { limit?: number; offset?: number }): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/projects/", { params });
+    return res.data;
+  },
+  async get(id: string): Promise<any> {
+    const res = await api.get<any>(`/api/projects/${id}/`);
+    return res.data;
+  },
+  async update(id: string, body: any): Promise<any> {
+    const res = await api.patch<any>(`/api/projects/${id}/`, body);
+    return res.data;
+  },
+  async delete(id: string): Promise<void> {
+    await api.delete(`/api/projects/${id}/`);
+  },
+};
+
+// ------------------ Workflow API (восстановлено) ------------------
+export const workflowAPI = {
+  async upload(projectId: string, file: File, importId?: string | null): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (importId) formData.append("import_id", importId);
+    const res = await api.post<any>(`/api/projects/${projectId}/imports/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+  async finalize(projectId: string, importId: string): Promise<any> {
+    const res = await api.post<any>(`/api/projects/${projectId}/imports/${importId}/finalize/`, {});
+    return res.data;
+  },
+  async overview(projectId: string): Promise<any> {
+    const res = await api.get<any>(`/api/projects/${projectId}/overview/`);
+    return res.data;
+  },
+  async export(projectId: string): Promise<any> {
+    const res = await api.get<any>(`/api/projects/${projectId}/export/`);
+    return res.data;
+  },
+};
+
+// ------------------ Users API (массовое создание + аватар) ------------------
+export const usersAPI = {
+  async bulkCreateAnnotators(file: File, groups: string, specialization?: string, experienceLevel?: string): Promise<Blob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('groups', groups);
+    if (specialization) formData.append('specialization', specialization);
+    if (experienceLevel) formData.append('experience_level', experienceLevel);
+    
+    const res = await api.post<Blob>('/api/users/bulk-create-annotators/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+
+  // ✅ Загрузка аватарки
+  async uploadAvatar(file: File): Promise<{ avatar_url: string; message: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const res = await api.post<{ avatar_url: string; message: string }>(
+      '/api/users/me/avatar/',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    return res.data;
+  },
+
+  // ✅ Удаление аватарки
+  async deleteAvatar(): Promise<{ message: string }> {
+    const res = await api.delete<{ message: string }>('/api/users/me/avatar/delete/');
+    return res.data;
+  },
+};
+
+// ------------------ Stats API ------------------
+export const statsAPI = {
+  async myStats(): Promise<UserStats> {
+    const res = await api.get<UserStats>("/api/users/me/stats/");
+    return res.data;
+  },
+};
+
+// ------------------ Leaderboard API ------------------
+export const leaderboardAPI = {
+  async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
+    const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
     return res.data;
   },
 };

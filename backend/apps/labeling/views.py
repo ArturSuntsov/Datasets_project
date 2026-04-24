@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from bson import ObjectId
 from django.http import HttpRequest
+from mongoengine import DoesNotExist
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet

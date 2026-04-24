@@ -1,6 +1,7 @@
+import React, { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { datasetsAPI, tasksAPI } from "../services/api";
+import { datasetsAPI, tasksAPI, usersAPI } from "../services/api";
 import { ApiListResponse, Dataset, Task } from "../types";
 import { useAuthStore } from "../store";
 import { LoadingSpinner } from "../components/LoadingSpinner";
@@ -36,6 +37,15 @@ export function DashboardPage() {
   const role = user?.role ?? "customer";
   const isCustomer = isCustomerRole(role);
   const isAnnotator = isAnnotatorRole(role);
+
+  // Состояния для модального окна массового создания аннотаторов
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [groupsInput, setGroupsInput] = useState("");
+  const [specializationInput, setSpecializationInput] = useState("");
+  const [experienceLevelInput, setExperienceLevelInput] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const datasetsQuery = useQuery<ApiListResponse<Dataset>>({
     queryKey: ["dashboard-datasets"],
@@ -225,6 +235,47 @@ export function DashboardPage() {
         },
       ];
 
+  // Обработчик загрузки файла
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setUploadFile(e.target.files[0]);
+    }
+  };
+
+  const handleBulkUpload = async () => {
+    if (!uploadFile) return;
+    setIsUploading(true);
+    try {
+      const blob = await usersAPI.bulkCreateAnnotators(
+        uploadFile,
+        groupsInput,
+        specializationInput,
+        experienceLevelInput
+      );
+      // Скачиваем файл
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'annotators_credentials.txt';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      // Сбрасываем состояние
+      setShowBulkModal(false);
+      setUploadFile(null);
+      setGroupsInput('');
+      setSpecializationInput('');
+      setExperienceLevelInput('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (error) {
+      console.error('Upload failed', error);
+      alert('Ошибка при создании аннотаторов. Проверьте формат файла.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="pb-6 border-b border-gray-200 dark:border-gray-700">
@@ -237,6 +288,19 @@ export function DashboardPage() {
           ! {isAnnotator ? "Здесь только ваши рабочие инструменты." : "Здесь инструменты управления проектами."}
         </p>
       </div>
+
+      {/* Кнопка массовой загрузки аннотаторов (только для customer/admin) */}
+      {isCustomer && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowBulkModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <span>👥</span>
+            Загрузить список аннотаторов
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat) => (
@@ -375,6 +439,126 @@ export function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* Модальное окно для массовой загрузки */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+              👥 Массовое создание аннотаторов
+            </h2>
+            
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              Загрузите текстовый файл (.txt) со списком «Имя Фамилия» (по одному на строку).
+              Для каждого будет создан аккаунт с автоматически сгенерированными учётными данными.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Файл со списком аннотаторов *
+                </label>
+                <input
+                  type="file"
+                  accept=".txt,text/plain"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="input-field"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Пример: Иван Петров
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Группы / Команды
+                </label>
+                <input
+                  type="text"
+                  value={groupsInput}
+                  onChange={(e) => setGroupsInput(e.target.value)}
+                  placeholder="Команда А, Проект Б, Отдел разметки"
+                  className="input-field"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Через запятую. Аннотаторы будут добавлены во все указанные группы.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Специализация (опционально)
+                </label>
+                <input
+                  type="text"
+                  value={specializationInput}
+                  onChange={(e) => setSpecializationInput(e.target.value)}
+                  placeholder="CV, NLP, Audio"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Уровень опыта (опционально)
+                </label>
+                <select
+                  value={experienceLevelInput}
+                  onChange={(e) => setExperienceLevelInput(e.target.value)}
+                  className="input-field"
+                >
+                  <option value="">Не указан</option>
+                  <option value="junior">Junior</option>
+                  <option value="middle">Middle</option>
+                  <option value="senior">Senior</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setUploadFile(null);
+                  setGroupsInput('');
+                  setSpecializationInput('');
+                  setExperienceLevelInput('');
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className="btn-secondary"
+                disabled={isUploading}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleBulkUpload}
+                className="btn-primary flex items-center gap-2"
+                disabled={!uploadFile || isUploading}
+              >
+                {isUploading ? (
+                  <>
+                    <LoadingSpinner size="sm" />
+                    Создание...
+                  </>
+                ) : (
+                  <>
+                    <span>📤</span>
+                    Создать аннотаторов
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <p className="text-sm text-blue-800 dark:text-blue-300">
+                <strong>💡 После создания:</strong> автоматически скачается файл с логинами и паролями.
+                Если аннотатор с таким именем уже существует – он будет пропущен.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 import jwt
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from mongoengine import Q
 from rest_framework import serializers
 

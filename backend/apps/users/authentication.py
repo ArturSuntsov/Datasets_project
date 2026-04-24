@@ -9,6 +9,7 @@ from __future__ import annotations
 import jwt
 from bson import ObjectId
 from django.conf import settings
+from mongoengine import DoesNotExist
 from rest_framework import authentication, exceptions
 
 from apps.users.models import User

@@ -43,7 +43,7 @@ Authorization: Bearer <access_token>
 {
   "email": "user@example.com",
   "username": "username",
-  "password": "securepassword123",
+  "password": "your-strong-password"
   "role": "customer"
 }
 ```
@@ -82,7 +82,7 @@ Authorization: Bearer <access_token>
 ```json
 {
   "identifier": "user@example.com",
-  "password": "securepassword123"
+  "password": "your-strong-password"
 }
 ```
 
@@ -728,6 +728,70 @@ Authorization: Bearer <token>
   "status": "completed"
 }
 ```
+
+Вот отформатированный контент в корректном Markdown для вставки в ваши `.md` файлы:
+
+---
+
+## 🔒 Безопасность
+
+### Аутентификация
+
+- Все запросы к API (кроме `/auth/register/` и `/auth/login/`) требуют JWT-токен.
+- Токен передаётся в заголовке:  
+  ```
+  Authorization: Bearer <token>
+  ```
+- Время жизни токена: **60 минут** (настраивается в `.env`).
+
+---
+
+### Переменные окружения
+
+> ⚠️ **Никогда не храните секреты в коде!**  
+> Все чувствительные данные должны находиться в файле `.env`, который добавлен в `.gitignore`.
+
+| Переменная | Назначение |
+|------------|------------|
+| `SECRET_KEY` | Секретный ключ Django |
+| `JWT_SECRET_KEY` | Ключ для подписи JWT |
+| `MONGO_URI` | Строка подключения к MongoDB |
+| `STRIPE_TEST_SECRET_KEY` | Ключ Stripe (тестовый режим) |
+| `STRIPE_LIVE_SECRET_KEY` | Ключ Stripe (production) |
+| `MONGODB_USER` | Пользователь MongoDB |
+| `MONGODB_PASSWORD` | Пароль MongoDB |
+
+#### Генерация надёжных ключей
+
+```bash
+# Сгенерировать криптографически стойкий ключ
+python -c "import secrets; print(secrets.token_urlsafe(50))"
+```
+
+---
+
+### Рекомендации по безопасности
+
+1. ✅ Используйте разные ключи для разработки и production
+2. ✅ Никогда не коммитьте файл `.env` в репозиторий
+3. ✅ В production установите `DEBUG=False`
+4. ✅ Используйте HTTPS для всех внешних запросов
+5. ✅ Регулярно обновляйте зависимости (`pip audit`, `npm audit`)
+6. ✅ Валидируйте и санитизируйте все входящие данные
+
+---
+
+### Rate Limiting
+
+| Тип запроса | Лимит | Окно |
+|-------------|-------|------|
+| Анонимные | 100 | 1 час |
+| Авторизованные | 1000 | 1 час |
+| `POST /auth/login/` | 10 | 1 час |
+| `POST /auth/register/` | 5 | 1 час |
+
+> Превышение лимита возвращает ответ `429 Too Many Requests`.
+
 
 ---
 

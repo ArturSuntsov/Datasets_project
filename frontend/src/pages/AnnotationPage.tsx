@@ -133,6 +133,7 @@ export default function AnnotationPage() {
 
   const frame = assignmentQuery.data.frame;
   const workflowMeta = assignmentQuery.data.workflow_meta;
+  const batch = assignmentQuery.data.task_batch;
 
   return (
     <div className="space-y-6">
@@ -179,6 +180,45 @@ export default function AnnotationPage() {
             {workflowMeta?.task_batch_number ? (
               <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-200">
                 Пакетная логика активна: до {workflowMeta.task_batch_target_size || workflowMeta.task_batch_size || 10} кадров в задании и минимум {workflowMeta.min_sequence_size || 3} соседних кадров в последовательности.
+              </div>
+            ) : null}
+            {batch?.items?.length ? (
+              <div className="mb-4 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    Кадры в пакете {batch.batch_number}/{batch.total_batches}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Текущий кадр: {batch.current_index}/{batch.total}
+                  </div>
+                </div>
+                <div className="grid grid-cols-5 gap-2 lg:grid-cols-10">
+                  {batch.items.map((item, index) => {
+                    const isCurrent = item.assignment_id === assignmentQuery.data.assignment_id;
+                    const isOpenable = Boolean(item.assignment_id);
+                    const tone =
+                      item.assignment_status === "accepted"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : item.assignment_status === "submitted"
+                          ? "border-amber-300 bg-amber-50 text-amber-700"
+                          : item.assignment_status === "draft" || item.assignment_status === "in_progress"
+                            ? "border-blue-300 bg-blue-50 text-blue-700"
+                            : "border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200";
+                    return isOpenable ? (
+                      <Link
+                        key={item.work_item_id}
+                        to={`/labeling/assignments/${item.assignment_id}`}
+                        className={`rounded-lg border px-2 py-2 text-center text-xs font-medium transition ${tone} ${isCurrent ? "ring-2 ring-indigo-400" : ""}`}
+                      >
+                        {index + 1}
+                      </Link>
+                    ) : (
+                      <div key={item.work_item_id} className={`rounded-lg border px-2 py-2 text-center text-xs font-medium opacity-70 ${tone}`}>
+                        {index + 1}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
 

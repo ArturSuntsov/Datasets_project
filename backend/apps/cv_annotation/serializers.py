@@ -104,6 +104,24 @@ class ReviewResolveSerializer(serializers.Serializer):
         return value
 
 
+class ValidationBatchResolveSerializer(serializers.Serializer):
+    items = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    batch_comment = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_items(self, value):
+        normalized = []
+        for index, item in enumerate(value):
+            work_item_id = str(item.get("work_item_id") or "").strip()
+            decision = str(item.get("decision") or "").strip().lower()
+            comment = str(item.get("comment") or "").strip()
+            if not ObjectId.is_valid(work_item_id):
+                raise serializers.ValidationError(f"items[{index}].work_item_id is invalid")
+            if decision not in {"approve", "needs_changes"}:
+                raise serializers.ValidationError(f"items[{index}].decision must be 'approve' or 'needs_changes'")
+            normalized.append({"work_item_id": work_item_id, "decision": decision, "comment": comment})
+        return normalized
+
+
 class ParticipantSerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)
     username = serializers.CharField(read_only=True)

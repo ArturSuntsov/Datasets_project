@@ -33,6 +33,10 @@ import {
   Transaction,
   TransferRequest,
   User,
+  ValidationBatchDetail,
+  ValidationBatchResolveRequest,
+  ValidationBatchResolveResponse,
+  ValidationQueueItem,
 } from "../types";
 
 
@@ -249,6 +253,21 @@ export const reviewerAPI = {
   },
   async resolve(reviewId: string, body: ReviewResolveRequest): Promise<ReviewResolveResponse> {
     const res = await api.post<ReviewResolveResponse>(`/api/reviews/${reviewId}/resolve/`, body);
+    return res.data;
+  },
+};
+
+export const validationAPI = {
+  async queue(): Promise<ApiListResponse<ValidationQueueItem>> {
+    const res = await api.get<ApiListResponse<ValidationQueueItem>>("/api/validation/queue/");
+    return res.data;
+  },
+  async batchDetail(projectId: string, taskBatchId: string): Promise<ValidationBatchDetail> {
+    const res = await api.get<ValidationBatchDetail>(`/api/validation/projects/${projectId}/batches/${encodeURIComponent(taskBatchId)}/`);
+    return res.data;
+  },
+  async resolveBatch(projectId: string, taskBatchId: string, body: ValidationBatchResolveRequest): Promise<ValidationBatchResolveResponse> {
+    const res = await api.post<ValidationBatchResolveResponse>(`/api/validation/projects/${projectId}/batches/${encodeURIComponent(taskBatchId)}/resolve/`, body);
     return res.data;
   },
 };

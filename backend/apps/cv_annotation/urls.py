@@ -15,6 +15,9 @@ from .views import (
     ReviewResolveView,
     ReviewerQueueView,
     SecurityEventsView,
+    ValidationBatchDetailView,
+    ValidationBatchResolveView,
+    ValidationQueueView,
 )
 
 urlpatterns = [
@@ -31,5 +34,8 @@ urlpatterns = [
     path("reviewer/queue/", ReviewerQueueView.as_view(), name="reviewer-queue"),
     path("reviews/<str:review_id>/", ReviewDetailView.as_view(), name="review-detail"),
     path("reviews/<str:review_id>/resolve/", ReviewResolveView.as_view(), name="review-resolve"),
+    path("validation/queue/", ValidationQueueView.as_view(), name="validation-queue"),
+    path("validation/projects/<str:project_id>/batches/<str:task_batch_id>/", ValidationBatchDetailView.as_view(), name="validation-batch-detail"),
+    path("validation/projects/<str:project_id>/batches/<str:task_batch_id>/resolve/", ValidationBatchResolveView.as_view(), name="validation-batch-resolve"),
     path("projects/<str:project_id>/security-events/", SecurityEventsView.as_view(), name="project-security-events"),
 ]

@@ -11,9 +11,10 @@ from apps.projects.models import Project, ProjectMembership
 from apps.users.models import User
 from apps.users.views import authenticate_from_jwt
 from .models import Assignment, ImportAsset, ImportSession, ReviewRecord, SecurityEvent, WorkAnnotation, WorkItem
-from .serializers import AssignmentSubmitSerializer, ImportFinalizeSerializer, ReviewResolveSerializer
+from .serializers import AssignmentSubmitSerializer, ImportFinalizeSerializer, ReviewResolveSerializer, ValidationBatchResolveSerializer
 from .services.upload import save_project_file
 from .services.workflow import (
+    annotator_batch_payload,
     build_dataset_export_archive,
     build_dataset_export,
     build_import_preview,
@@ -21,7 +22,10 @@ from .services.workflow import (
     process_import_asset,
     project_overview,
     resolve_review,
+    resolve_validation_batch,
     save_assignment_annotation,
+    validation_batch_detail,
+    validation_queue,
 )
 
 
@@ -348,6 +352,9 @@ class AnnotatorProjectDetailView(AuthenticatedAPIView):
                 "total_assignments": len(assignments),
                 "batch_count": len({item.work_item.workflow_meta.get("task_batch_id") for item in assignments if item.work_item.workflow_meta.get("task_batch_id")}),
                 "validation_ready_count": sum(1 for item in assignments if item.work_item.workflow_meta.get("validation_ready")),
+                "validation_pending_count": sum(1 for item in WorkItem.objects(project=project) if item.validation_status == WorkItem.VALIDATION_PENDING),
+                "validation_approved_count": sum(1 for item in WorkItem.objects(project=project) if item.validation_status == WorkItem.VALIDATION_APPROVED),
+                "validation_needs_changes_count": sum(1 for item in WorkItem.objects(project=project) if item.validation_status == WorkItem.VALIDATION_NEEDS_CHANGES),
             },
             "workflow": project_overview(project).get("work_items", {}),
             "next_assignment_id": str(next_assignment.id) if next_assignment else None,
@@ -425,6 +432,7 @@ class AnnotatorAssignmentDetailView(AuthenticatedAPIView):
                 "instructions": assignment.project.instructions,
                 "label_schema": assignment.project.label_schema or [],
                 "workflow_meta": assignment.work_item.workflow_meta or {},
+                "task_batch": annotator_batch_payload(assignment.project, assignment.annotator, assignment),
                 "draft": draft_payload,
                 "pre_annotations": preannotation_payload,
                 "comment": draft_comment,
@@ -575,6 +583,55 @@ class ReviewResolveView(AuthenticatedAPIView):
         serializer = ReviewResolveSerializer(data=request.data, context={"review": review})
         serializer.is_valid(raise_exception=True)
         result = resolve_review(review, user, serializer.validated_data["resolution"])
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class ValidationQueueView(AuthenticatedAPIView):
+    def get(self, request):
+        try:
+            user = self.get_user(request)
+        except PermissionError:
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+        if user.role not in (User.ROLE_CUSTOMER, User.ROLE_ADMIN):
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        projects = list(Project.objects(owner=user)) if user.role == User.ROLE_CUSTOMER else list(Project.objects)
+        return Response({"items": validation_queue(projects)}, status=status.HTTP_200_OK)
+
+
+class ValidationBatchDetailView(AuthenticatedAPIView):
+    def get(self, request, project_id: str, task_batch_id: str):
+        try:
+            user = self.get_user(request)
+        except PermissionError:
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+        project = self.get_project_for_user(user, project_id, require_owner=True if user.role == User.ROLE_CUSTOMER else False)
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        if user.role not in (User.ROLE_CUSTOMER, User.ROLE_ADMIN):
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        return Response(validation_batch_detail(project, task_batch_id), status=status.HTTP_200_OK)
+
+
+class ValidationBatchResolveView(AuthenticatedAPIView):
+    def post(self, request, project_id: str, task_batch_id: str):
+        try:
+            user = self.get_user(request)
+        except PermissionError:
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+        project = self.get_project_for_user(user, project_id, require_owner=True if user.role == User.ROLE_CUSTOMER else False)
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        if user.role not in (User.ROLE_CUSTOMER, User.ROLE_ADMIN):
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        serializer = ValidationBatchResolveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = resolve_validation_batch(
+            project,
+            task_batch_id,
+            actor=user,
+            items=serializer.validated_data["items"],
+            batch_comment=serializer.validated_data.get("batch_comment", ""),
+        )
         return Response(result, status=status.HTTP_200_OK)
 
 

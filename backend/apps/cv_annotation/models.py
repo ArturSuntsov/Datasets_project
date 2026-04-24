@@ -97,6 +97,10 @@ class WorkItem(Document):
     STATUS_IN_REVIEW = "in_review"
     STATUS_COMPLETED = "completed"
 
+    VALIDATION_PENDING = "pending"
+    VALIDATION_APPROVED = "approved"
+    VALIDATION_NEEDS_CHANGES = "needs_changes"
+
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
     status = StringField(required=True, default=STATUS_PENDING, choices=[STATUS_PENDING, STATUS_IN_REVIEW, STATUS_COMPLETED])
@@ -110,12 +114,19 @@ class WorkItem(Document):
     pre_annotation_confidence_threshold = FloatField(default=0.7)
     workflow_meta = DictField(default=dict)
     video_qc = DictField(default=dict)
+    validation_status = StringField(
+        default=VALIDATION_PENDING,
+        choices=[VALIDATION_PENDING, VALIDATION_APPROVED, VALIDATION_NEEDS_CHANGES],
+    )
+    validation_comment = StringField(default="")
+    validated_by = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+    validated_at = DateTimeField(null=True)
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
     meta = {
         "collection": "cv_work_items",
-        "indexes": ["project", "status", "review_status"],
+        "indexes": ["project", "status", "review_status", "validation_status"],
     }
 
     def save(self, *args, **kwargs):

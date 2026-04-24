@@ -353,6 +353,9 @@ export interface AnnotatorProjectDetail {
     total_assignments: number;
     batch_count: number;
     validation_ready_count: number;
+    validation_pending_count?: number;
+    validation_approved_count?: number;
+    validation_needs_changes_count?: number;
   };
   workflow?: {
     workflow_batches_total?: number;
@@ -395,6 +398,33 @@ export interface AssignmentDetail {
   instructions: string;
   label_schema: ProjectLabel[];
   workflow_meta?: AssignmentWorkflowMeta;
+  task_batch?: {
+    task_batch_id: string;
+    batch_number: number;
+    total_batches: number;
+    current_index: number;
+    total: number;
+    items: Array<{
+      work_item_id: string;
+      frame_id: string;
+      frame_url: string;
+      frame_number: number;
+      timestamp_sec: number;
+      width: number;
+      height: number;
+      status: string;
+      assignment_id?: string | null;
+      assignment_status?: string | null;
+      queue_position?: number | null;
+      workflow_meta?: AssignmentWorkflowMeta;
+      agreement_score?: number;
+      final_annotation?: { boxes: BoundingBox[] };
+      final_box_count?: number;
+      video_qc?: Record<string, unknown>;
+      validation_status?: string;
+      validation_comment?: string;
+    }>;
+  };
   draft: { boxes: BoundingBox[] };
   pre_annotations?: { boxes?: BoundingBox[]; [key: string]: unknown };
   comment: string;
@@ -485,6 +515,65 @@ export interface ProjectExportPayload {
       lines: string[];
     }>;
   };
+}
+
+export interface ValidationQueueItem {
+  project_id: string;
+  project_title: string;
+  task_batch_id: string;
+  batch_number: number;
+  frames_total: number;
+  approved_frames: number;
+  needs_changes_frames: number;
+  flagged_frames: number;
+  average_agreement: number;
+  validation_status: "pending" | "needs_changes" | string;
+}
+
+export interface ValidationBatchDetail {
+  project_id: string;
+  project_title: string;
+  task_batch_id: string;
+  batch_number: number;
+  frames_total: number;
+  items: Array<{
+    work_item_id: string;
+    frame_id: string;
+    frame_url: string;
+    frame_number: number;
+    timestamp_sec: number;
+    width: number;
+    height: number;
+    status: string;
+    assignment_id?: string | null;
+    assignment_status?: string | null;
+    queue_position?: number | null;
+    workflow_meta?: AssignmentWorkflowMeta;
+    agreement_score?: number;
+    final_annotation?: { boxes: BoundingBox[] };
+    final_box_count?: number;
+    video_qc?: Record<string, unknown>;
+    validation_status?: string;
+    validation_comment?: string;
+  }>;
+  all_approved: boolean;
+}
+
+export interface ValidationBatchResolveRequest {
+  items: Array<{
+    work_item_id: string;
+    decision: "approve" | "needs_changes";
+    comment?: string;
+  }>;
+  batch_comment?: string;
+}
+
+export interface ValidationBatchResolveResponse {
+  project_id: string;
+  task_batch_id: string;
+  approved_items: number;
+  requeued_items: number;
+  status: string;
 }
 
 export interface AnnotateRequest {

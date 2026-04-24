@@ -28,6 +28,122 @@ def _next_queue_position(project: Project) -> int:
     return int(last_assignment.queue_position or 0) + 1 if last_assignment else 0
 
 
+def _batch_work_items(project: Project, task_batch_id: str) -> List[WorkItem]:
+    items = [
+        item
+        for item in WorkItem.objects(project=project)
+        if (item.workflow_meta or {}).get("task_batch_id") == task_batch_id
+    ]
+    return sorted(
+        items,
+        key=lambda item: (
+            int((item.workflow_meta or {}).get("task_batch_number") or 0),
+            int((item.workflow_meta or {}).get("task_batch_index") or 0),
+            int(item.frame.frame_number or 0),
+        ),
+    )
+
+
+def _work_item_payload(work_item: WorkItem, assignment: Optional[Assignment] = None) -> dict:
+    frame = work_item.frame
+    final_boxes = _normalize_boxes(work_item.final_annotation)
+    return {
+        "work_item_id": str(work_item.id),
+        "frame_id": str(frame.id),
+        "frame_url": frame.frame_uri,
+        "frame_number": frame.frame_number,
+        "timestamp_sec": frame.timestamp_sec,
+        "width": frame.width,
+        "height": frame.height,
+        "status": work_item.status,
+        "assignment_id": str(assignment.id) if assignment else None,
+        "assignment_status": assignment.status if assignment else None,
+        "queue_position": assignment.queue_position if assignment else None,
+        "workflow_meta": work_item.workflow_meta or {},
+        "agreement_score": float(work_item.agreement_score or 0.0),
+        "final_annotation": {"boxes": final_boxes},
+        "final_box_count": len(final_boxes),
+        "video_qc": work_item.video_qc or {},
+        "validation_status": work_item.validation_status or WorkItem.VALIDATION_PENDING,
+        "validation_comment": work_item.validation_comment or "",
+    }
+
+
+def annotator_batch_payload(project: Project, annotator: User, current_assignment: Assignment) -> dict:
+    task_batch_id = str((current_assignment.work_item.workflow_meta or {}).get("task_batch_id") or "").strip()
+    if not task_batch_id:
+        return {"task_batch_id": "", "items": [], "current_index": 0, "total": 0}
+    batch_items = _batch_work_items(project, task_batch_id)
+    assignments = {
+        str(item.work_item.id): item
+        for item in Assignment.objects(project=project, annotator=annotator, work_item__in=batch_items)
+    }
+    items_payload = []
+    current_index = 0
+    for index, work_item in enumerate(batch_items, start=1):
+        assignment = assignments.get(str(work_item.id))
+        payload = _work_item_payload(work_item, assignment=assignment)
+        items_payload.append(payload)
+        if assignment and str(assignment.id) == str(current_assignment.id):
+            current_index = index
+    return {
+        "task_batch_id": task_batch_id,
+        "batch_number": int((current_assignment.work_item.workflow_meta or {}).get("task_batch_number") or 0),
+        "total_batches": int((current_assignment.work_item.workflow_meta or {}).get("task_batch_total") or 0),
+        "current_index": current_index,
+        "total": len(items_payload),
+        "items": items_payload,
+    }
+
+
+def validation_queue(projects: List[Project]) -> List[dict]:
+    items: List[dict] = []
+    for project in projects:
+        work_items = list(WorkItem.objects(project=project))
+        batch_ids = sorted({str(item.workflow_meta.get("task_batch_id") or "") for item in work_items if item.workflow_meta.get("task_batch_id")})
+        for batch_id in batch_ids:
+            batch_items = _batch_work_items(project, batch_id)
+            if not batch_items:
+                continue
+            ready_items = [item for item in batch_items if item.status == WorkItem.STATUS_COMPLETED]
+            if len(ready_items) != len(batch_items):
+                continue
+            has_pending = any(item.validation_status != WorkItem.VALIDATION_APPROVED for item in batch_items)
+            if not has_pending:
+                continue
+            needs_changes = sum(1 for item in batch_items if item.validation_status == WorkItem.VALIDATION_NEEDS_CHANGES)
+            flagged_items = sum(1 for item in batch_items if (item.video_qc or {}).get("flag_for_review"))
+            items.append(
+                {
+                    "project_id": str(project.id),
+                    "project_title": project.title,
+                    "task_batch_id": batch_id,
+                    "batch_number": int((batch_items[0].workflow_meta or {}).get("task_batch_number") or 0),
+                    "frames_total": len(batch_items),
+                    "approved_frames": sum(1 for item in batch_items if item.validation_status == WorkItem.VALIDATION_APPROVED),
+                    "needs_changes_frames": needs_changes,
+                    "flagged_frames": flagged_items,
+                    "average_agreement": round(sum(float(item.agreement_score or 0.0) for item in batch_items) / len(batch_items), 4),
+                    "validation_status": "needs_changes" if needs_changes else "pending",
+                }
+            )
+    items.sort(key=lambda item: (item["project_title"], item["batch_number"]))
+    return items
+
+
+def validation_batch_detail(project: Project, task_batch_id: str) -> dict:
+    batch_items = _batch_work_items(project, task_batch_id)
+    return {
+        "project_id": str(project.id),
+        "project_title": project.title,
+        "task_batch_id": task_batch_id,
+        "batch_number": int((batch_items[0].workflow_meta or {}).get("task_batch_number") or 0) if batch_items else 0,
+        "frames_total": len(batch_items),
+        "items": [_work_item_payload(item) for item in batch_items],
+        "all_approved": all(item.validation_status == WorkItem.VALIDATION_APPROVED for item in batch_items) if batch_items else False,
+    }
+
+
 def build_import_preview(import_session: ImportSession) -> dict:
     assets = list(ImportAsset.objects(import_session=import_session))
     processed = [asset for asset in assets if asset.processing_status == ImportAsset.STATUS_PROCESSED]
@@ -308,6 +424,7 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
             if not work_item:
                 work_item = WorkItem(project=project, frame=frame)
                 work_item.workflow_meta = workflow_meta
+                work_item.validation_status = WorkItem.VALIDATION_PENDING
                 ai_enabled = bool((project.participant_rules or {}).get("ai_prelabel_enabled", True))
                 if ai_enabled:
                     model_name = str((project.participant_rules or {}).get("ai_model") or "baseline-box-v1")
@@ -498,6 +615,10 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
         work_item.status = WorkItem.STATUS_COMPLETED
         work_item.review_required = False
         work_item.review_status = "auto_accepted"
+        work_item.validation_status = WorkItem.VALIDATION_PENDING
+        work_item.validation_comment = ""
+        work_item.validated_by = None
+        work_item.validated_at = None
         work_item.final_annotation = annotations[0].label_data
         work_item.final_source = "annotator_consensus"
         work_item.save()
@@ -596,6 +717,111 @@ def requeue_low_agreement_work_item(work_item: WorkItem, annotations: List[WorkA
             created += 1
 
     return created
+
+
+def requeue_work_item_for_validation(work_item: WorkItem, actor: User | None = None, reason: str = "validation_needs_changes") -> int:
+    project = work_item.project
+    queue_position = _next_queue_position(project)
+    existing_assignments = list(Assignment.objects(work_item=work_item).order_by("order_index", "created_at"))
+    for assignment in existing_assignments:
+        annotation = WorkAnnotation.objects(assignment=assignment).first()
+        if annotation:
+            annotation.status = WorkAnnotation.STATUS_REJECTED
+            annotation.is_final = False
+            annotation.save()
+        assignment.status = Assignment.STATUS_DISPUTED
+        assignment.started_at = None
+        assignment.submitted_at = None
+        assignment.quality_signals = {
+            **(assignment.quality_signals or {}),
+            "requeue_reason": reason,
+        }
+        assignment.save()
+
+    work_item.status = WorkItem.STATUS_PENDING
+    work_item.final_annotation = {}
+    work_item.final_source = ""
+    work_item.validation_status = WorkItem.VALIDATION_NEEDS_CHANGES
+    work_item.validated_by = actor
+    work_item.validated_at = datetime.utcnow() if actor else work_item.validated_at
+    work_item.save()
+
+    created = 0
+    required_assignments = max(1, int(project.assignments_per_task or 1))
+    existing_annotator_ids = {str(item.annotator.id) for item in existing_assignments}
+    fresh_candidates = [
+        user
+        for user in select_annotators_for_project(project, max(required_assignments * 3, len(existing_assignments) + required_assignments))
+        if str(user.id) not in existing_annotator_ids
+    ]
+    next_order = Assignment.objects(work_item=work_item).count()
+    for annotator in fresh_candidates[:required_assignments]:
+        Assignment(
+            project=project,
+            work_item=work_item,
+            annotator=annotator,
+            order_index=next_order,
+            queue_position=queue_position,
+            status=Assignment.STATUS_ASSIGNED,
+        ).save()
+        next_order += 1
+        queue_position += 1
+        created += 1
+        log_security_event(
+            project=project,
+            actor=actor,
+            event_type=SecurityEvent.EVENT_ASSIGNMENT_DISTRIBUTION,
+            payload={"work_item_id": str(work_item.id), "annotator_id": str(annotator.id), "reason": reason},
+            severity="warning",
+        )
+    if created < required_assignments:
+        reusable_assignments = sorted(existing_assignments, key=lambda item: (item.order_index, item.created_at))
+        for assignment in reusable_assignments[: required_assignments - created]:
+            assignment.status = Assignment.STATUS_ASSIGNED
+            assignment.started_at = None
+            assignment.submitted_at = None
+            assignment.queue_position = queue_position
+            assignment.quality_signals = {
+                **(assignment.quality_signals or {}),
+                "requeue_reason": reason,
+                "requeue_count": int((assignment.quality_signals or {}).get("requeue_count") or 0) + 1,
+            }
+            assignment.save()
+            queue_position += 1
+            created += 1
+    return created
+
+
+def resolve_validation_batch(project: Project, task_batch_id: str, actor: User, items: List[dict], batch_comment: str = "") -> dict:
+    decisions = {str(item.get("work_item_id") or ""): item for item in items if item.get("work_item_id")}
+    batch_items = _batch_work_items(project, task_batch_id)
+    approved = 0
+    requeued = 0
+    for work_item in batch_items:
+        decision = str((decisions.get(str(work_item.id), {}) or {}).get("decision") or "approve").strip().lower()
+        comment = str((decisions.get(str(work_item.id), {}) or {}).get("comment") or "").strip()
+        if decision == "needs_changes":
+            work_item.validation_comment = comment or batch_comment
+            created = requeue_work_item_for_validation(work_item, actor=actor, reason="validation_needs_changes")
+            work_item.validation_comment = comment or batch_comment
+            work_item.save()
+            requeued += created or 1
+            continue
+
+        work_item.validation_status = WorkItem.VALIDATION_APPROVED
+        work_item.validation_comment = comment or batch_comment
+        work_item.validated_by = actor
+        work_item.validated_at = datetime.utcnow()
+        work_item.save()
+        approved += 1
+
+    return {
+        "project_id": str(project.id),
+        "task_batch_id": task_batch_id,
+        "approved_items": approved,
+        "requeued_items": requeued,
+        "status": "completed" if approved == len(batch_items) else "partial_requeue",
+    }
 
 
 def save_assignment_annotation(assignment: Assignment, label_data: dict, comment: str, is_final: bool) -> Tuple[WorkAnnotation, Optional[dict]]:
@@ -765,6 +991,9 @@ def project_overview(project: Project) -> dict:
             "pending": sum(1 for item in work_items if item.status == WorkItem.STATUS_PENDING),
             "in_review": sum(1 for item in work_items if item.status == WorkItem.STATUS_IN_REVIEW),
             "completed": sum(1 for item in work_items if item.status == WorkItem.STATUS_COMPLETED),
+            "validation_pending": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_PENDING),
+            "validation_approved": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_APPROVED),
+            "validation_needs_changes": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_NEEDS_CHANGES),
             "average_agreement": round(sum(item.agreement_score for item in work_items) / len(work_items), 4) if work_items else 0.0,
             "workflow_batches_total": len({item.workflow_meta.get("task_batch_id") for item in work_items if item.workflow_meta.get("task_batch_id")}),
             "validation_ready_items": sum(1 for item in work_items if item.workflow_meta.get("validation_ready")),
@@ -800,6 +1029,11 @@ def _quality_report(project: Project, work_items: List[WorkItem], assignments: L
         "work_items_completed": len(completed),
         "work_items_in_review": len(pending_review),
         "work_items_rejected_or_flagged": len(rejected),
+        "validation": {
+            "pending": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_PENDING),
+            "approved": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_APPROVED),
+            "needs_changes": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_NEEDS_CHANGES),
+        },
         "completion_rate": round((len(completed) / total), 4) if total else 0.0,
         "average_agreement": round(sum(agreement_values) / len(agreement_values), 4) if agreement_values else 0.0,
         "assignments": {
@@ -866,6 +1100,7 @@ def _build_coco_export(project: Project, completed_items: List[WorkItem]) -> dic
                 "agreement_score": work_item.agreement_score,
                 "review_status": work_item.review_status,
                 "final_source": work_item.final_source,
+                "validation_status": work_item.validation_status,
             }
         )
     return {"manifest": manifest_items, "coco": {"images": images, "annotations": annotations, "categories": categories}}

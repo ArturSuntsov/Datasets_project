@@ -1,122 +1,212 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { reviewerAPI } from "../services/api";
-import { BoundingBox } from "../types";
+import { validationAPI } from "../services/api";
 import { useAuthStore } from "../store";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+
+type DecisionMap = Record<string, { decision: "approve" | "needs_changes"; comment: string }>;
 
 export function QualityPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
-  const [resolutionJson, setResolutionJson] = useState<string>(JSON.stringify({ boxes: [] }, null, 2));
+  const [selectedBatchKey, setSelectedBatchKey] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<DecisionMap>({});
+  const [batchComment, setBatchComment] = useState("");
 
   const queueQuery = useQuery({
-    queryKey: ["reviewer-queue"],
-    queryFn: () => reviewerAPI.queue(),
-    enabled: user?.role === "reviewer" || user?.role === "admin",
+    queryKey: ["validation-queue"],
+    queryFn: () => validationAPI.queue(),
+    enabled: user?.role === "customer" || user?.role === "admin",
+  });
+
+  const selectedQueueItem = useMemo(
+    () => queueQuery.data?.items.find((item) => `${item.project_id}:${item.task_batch_id}` === selectedBatchKey) ?? null,
+    [queueQuery.data?.items, selectedBatchKey]
+  );
+
+  useEffect(() => {
+    if (!selectedBatchKey && queueQuery.data?.items?.length) {
+      const first = queueQuery.data.items[0];
+      setSelectedBatchKey(`${first.project_id}:${first.task_batch_id}`);
+    }
+  }, [queueQuery.data, selectedBatchKey]);
+
+  const batchDetailQuery = useQuery({
+    queryKey: ["validation-batch-detail", selectedQueueItem?.project_id, selectedQueueItem?.task_batch_id],
+    queryFn: () => validationAPI.batchDetail(selectedQueueItem!.project_id, selectedQueueItem!.task_batch_id),
+    enabled: !!selectedQueueItem,
   });
 
   useEffect(() => {
-    if (!selectedReviewId && queueQuery.data?.items?.length) {
-      setSelectedReviewId(queueQuery.data.items[0].review_id);
+    if (!batchDetailQuery.data) return;
+    const next: DecisionMap = {};
+    for (const item of batchDetailQuery.data.items) {
+      next[item.work_item_id] = {
+        decision: item.validation_status === "needs_changes" ? "needs_changes" : "approve",
+        comment: item.validation_comment || "",
+      };
     }
-  }, [queueQuery.data, selectedReviewId]);
-
-  const reviewDetailQuery = useQuery({
-    queryKey: ["review-detail", selectedReviewId],
-    queryFn: () => reviewerAPI.detail(selectedReviewId!),
-    enabled: !!selectedReviewId,
-  });
-
-  useEffect(() => {
-    if (reviewDetailQuery.data?.resolution) {
-      setResolutionJson(JSON.stringify(reviewDetailQuery.data.resolution, null, 2));
-    }
-  }, [reviewDetailQuery.data?.resolution]);
+    setDecisions(next);
+    setBatchComment("");
+  }, [batchDetailQuery.data?.task_batch_id]);
 
   const resolveMutation = useMutation({
-    mutationFn: async () => reviewerAPI.resolve(selectedReviewId!, { resolution: JSON.parse(resolutionJson) }),
+    mutationFn: async () => {
+      if (!selectedQueueItem) throw new Error("Пакет не выбран");
+      return validationAPI.resolveBatch(selectedQueueItem.project_id, selectedQueueItem.task_batch_id, {
+        items: Object.entries(decisions).map(([work_item_id, value]) => ({
+          work_item_id,
+          decision: value.decision,
+          comment: value.comment,
+        })),
+        batch_comment: batchComment,
+      });
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["reviewer-queue"] });
-      await queryClient.invalidateQueries({ queryKey: ["review-detail", selectedReviewId] });
+      await queryClient.invalidateQueries({ queryKey: ["validation-queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["validation-batch-detail", selectedQueueItem?.project_id, selectedQueueItem?.task_batch_id] });
     },
   });
 
-  if (user?.role !== "reviewer" && user?.role !== "admin") {
+  if (user?.role !== "customer" && user?.role !== "admin") {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Review Queue</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Project owners can monitor quality from each project page. Review resolution is available to reviewers and admins.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Валидация</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Этот раздел доступен владельцам проектов и администраторам.</p>
       </div>
     );
   }
 
-  const items = queueQuery.data?.items ?? [];
+  const queueItems = queueQuery.data?.items ?? [];
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.88fr,1.12fr]">
       <div className="card">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reviewer Queue</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Resolve low-agreement tasks and produce the final annotation.</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Очередь валидации</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Здесь собраны пакеты кадров, которые прошли разметку и ждут приемки или отправки на доработку.
+        </p>
         {queueQuery.isLoading ? (
-          <div className="mt-6 flex justify-center"><LoadingSpinner size="lg" /></div>
-        ) : items.length === 0 ? (
-          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">No disputed tasks right now.</div>
+          <div className="mt-6 flex justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : queueItems.length === 0 ? (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">
+            В очереди валидации пока нет готовых пакетов.
+          </div>
         ) : (
           <div className="mt-6 space-y-3">
-            {items.map((item) => (
-              <button
-                key={item.review_id}
-                type="button"
-                onClick={() => setSelectedReviewId(item.review_id)}
-                className={`w-full rounded-lg border p-4 text-left transition ${selectedReviewId === item.review_id ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"}`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.project_title}</div>
-                    <div className="mt-2 font-semibold text-gray-900 dark:text-white">Review {item.review_id.slice(0, 8)}</div>
+            {queueItems.map((item) => {
+              const key = `${item.project_id}:${item.task_batch_id}`;
+              const isSelected = selectedBatchKey === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedBatchKey(key)}
+                  className={`w-full rounded-lg border p-4 text-left transition ${isSelected ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.project_title}</div>
+                      <div className="mt-2 text-lg font-semibold text-gray-900 dark:text-white">Пакет #{item.batch_number}</div>
+                    </div>
+                    <span className="badge badge-warning">{item.frames_total} кадров</span>
                   </div>
-                  <span className="badge badge-warning">agreement {item.agreement_score.toFixed(2)}</span>
-                </div>
-                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">{item.annotations.length} submissions · F1 {Number(item.metrics.f1 || 0).toFixed(2)}</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Golden: {item.golden_total ?? 0} checks · errors {item.golden_errors ?? 0} · score {Number(item.golden_score ?? 0).toFixed(2)}
-                </div>
-              </button>
-            ))}
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <span>Принято: {item.approved_frames}</span>
+                    <span>На доработку: {item.needs_changes_frames}</span>
+                    <span>Флаги QC: {item.flagged_frames}</span>
+                    <span>Среднее согласие: {item.average_agreement.toFixed(2)}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
       <div className="card space-y-4">
-        {!selectedReviewId || !reviewDetailQuery.data ? (
-          <div className="text-sm text-gray-500 dark:text-gray-400">Select a review from the queue to inspect annotations and resolve the dispute.</div>
+        {!selectedQueueItem || !batchDetailQuery.data ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">Выберите пакет из очереди, чтобы открыть кадры и принять решение по каждому из них.</div>
         ) : (
           <>
             <div>
-              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{reviewDetailQuery.data.project_title}</div>
-              <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Resolve review {reviewDetailQuery.data.review_id.slice(0, 8)}</h2>
+              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{batchDetailQuery.data.project_title}</div>
+              <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Валидация пакета #{batchDetailQuery.data.batch_number}</h2>
               <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Golden checks: {reviewDetailQuery.data.golden_total ?? 0} · errors: {reviewDetailQuery.data.golden_errors ?? 0} · score: {Number(reviewDetailQuery.data.golden_score ?? 0).toFixed(2)}
+                Кадров в пакете: {batchDetailQuery.data.frames_total}
               </div>
             </div>
-            <img src={reviewDetailQuery.data.frame_url} alt="Frame under review" className="max-h-[420px] rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {reviewDetailQuery.data.annotations.map((annotation) => (
-                <div key={annotation.annotation_id} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
-                  <div className="font-medium text-gray-900 dark:text-white">{annotation.annotator_username}</div>
-                  <pre className="mt-3 max-h-48 overflow-auto text-xs text-gray-700 dark:text-gray-300">{JSON.stringify(annotation.label_data, null, 2)}</pre>
-                  {annotation.comment ? <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{annotation.comment}</div> : null}
-                </div>
-              ))}
+
+            <div className="grid grid-cols-1 gap-4">
+              {batchDetailQuery.data.items.map((item, index) => {
+                const state = decisions[item.work_item_id] ?? { decision: "approve" as const, comment: "" };
+                const flagged = Boolean(item.video_qc?.flag_for_review);
+                return (
+                  <div key={item.work_item_id} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-white">Кадр {index + 1} / {batchDetailQuery.data.items.length}</div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          №{item.frame_number} | bbox: {item.final_box_count ?? 0} | agreement: {Number(item.agreement_score ?? 0).toFixed(2)}
+                        </div>
+                      </div>
+                      {flagged ? <span className="badge badge-warning">QC flag</span> : <span className="badge badge-success">OK</span>}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[220px,1fr]">
+                      <img src={item.frame_url} alt={`Кадр ${item.frame_number}`} className="h-40 w-full rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-900">
+                          <div className="font-medium text-gray-900 dark:text-white">Результат разметки</div>
+                          <pre className="mt-2 max-h-32 overflow-auto text-[11px] text-gray-700 dark:text-gray-300">{JSON.stringify(item.final_annotation ?? { boxes: [] }, null, 2)}</pre>
+                        </div>
+                        {flagged ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            Межкадровая проверка обнаружила подозрительное расхождение. Такой кадр удобно отправлять на доработку.
+                          </div>
+                        ) : null}
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-[220px,1fr]">
+                          <select
+                            className="input-field"
+                            value={state.decision}
+                            onChange={(event) =>
+                              setDecisions((current) => ({
+                                ...current,
+                                [item.work_item_id]: { ...state, decision: event.target.value as "approve" | "needs_changes" },
+                              }))
+                            }
+                          >
+                            <option value="approve">Принять</option>
+                            <option value="needs_changes">На доработку</option>
+                          </select>
+                          <input
+                            className="input-field"
+                            value={state.comment}
+                            onChange={(event) =>
+                              setDecisions((current) => ({
+                                ...current,
+                                [item.work_item_id]: { ...state, comment: event.target.value },
+                              }))
+                            }
+                            placeholder="Комментарий по кадру"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+
             <div>
-              <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Final resolution JSON</div>
-              <textarea className="input-field min-h-[220px] font-mono text-xs" value={resolutionJson} onChange={(event) => setResolutionJson(event.target.value)} />
+              <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий к пакету</div>
+              <textarea className="input-field min-h-[110px]" value={batchComment} onChange={(event) => setBatchComment(event.target.value)} placeholder="Общий комментарий по пакету" />
             </div>
+
             <button className="btn-primary" type="button" onClick={() => resolveMutation.mutate()} disabled={resolveMutation.isPending}>
-              {resolveMutation.isPending ? "Resolving..." : "Resolve review"}
+              {resolveMutation.isPending ? "Сохраняем..." : "Сохранить решения по пакету"}
             </button>
           </>
         )}

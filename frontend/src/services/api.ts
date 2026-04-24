@@ -237,6 +237,70 @@ export const financeAPI = {
   },
 };
 
+// ------------------ Annotator API ------------------
+export const annotatorAPI = {
+  async queue(params?: { limit?: number; offset?: number; status?: string }): Promise<{ items: Array<{ assignment_id: string; project_title: string; status: string; label_schema: Array<{ name: string }>; instruction: string; created_at: string }> }> {
+    const res = await api.get<{ items: Array<{ assignment_id: string; project_title: string; status: string; label_schema: Array<{ name: string }>; instruction: string; created_at: string }> }>("/api/annotator/queue/", { params });
+    return res.data;
+  },
+};
+
+// ------------------ Reviewer API ------------------
+export const reviewerAPI = {
+  async queue(params?: { limit?: number; offset?: number; status?: string }): Promise<{ items: Array<{ review_id: string; task_id: string; project_title: string; status: string; annotation: unknown; created_at: string }> }> {
+    const res = await api.get<{ items: Array<{ review_id: string; task_id: string; project_title: string; status: string; annotation: unknown; created_at: string }> }>("/api/reviewer/queue/", { params });
+    return res.data;
+  },
+  async detail(reviewId: string): Promise<{ review_id: string; task_id: string; annotation: unknown; resolution: unknown; status: string }> {
+    const res = await api.get<{ review_id: string; task_id: string; annotation: unknown; resolution: unknown; status: string }>(`/api/reviewer/${reviewId}/`);
+    return res.data;
+  },
+  async resolve(reviewId: string, body: { resolution: unknown }): Promise<{ review_id: string; status: string }> {
+    const res = await api.post<{ review_id: string; status: string }>(`/api/reviewer/${reviewId}/resolve/`, body);
+    return res.data;
+  },
+};
+
+// ------------------ Participants API ------------------
+export const participantsAPI = {
+  async list(role: "annotator" | "reviewer"): Promise<{ items: Array<{ user_id: string; username: string; email: string }> }> {
+    const res = await api.get<{ items: Array<{ user_id: string; username: string; email: string }> }>("/api/participants/", { params: { role } });
+    return res.data;
+  },
+};
+
+// ------------------ Projects API ------------------
+export const projectsAPI = {
+  async list(params?: { limit?: number; offset?: number }): Promise<ApiListResponse<unknown>> {
+    const res = await api.get<ApiListResponse<unknown>>("/api/projects/", { params });
+    return res.data;
+  },
+  async create(body: Record<string, unknown>): Promise<unknown> {
+    const res = await api.post<unknown>("/api/projects/", body);
+    return res.data;
+  },
+  async get(id: string): Promise<unknown> {
+    const res = await api.get<unknown>(`/api/projects/${id}/`);
+    return res.data;
+  },
+  async update(id: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await api.patch<unknown>(`/api/projects/${id}/`, body);
+    return res.data;
+  },
+};
+
+// ------------------ Workflow API ------------------
+export const workflowAPI = {
+  async get(projectId: string): Promise<unknown> {
+    const res = await api.get<unknown>(`/api/projects/${projectId}/workflow/`);
+    return res.data;
+  },
+  async update(projectId: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await api.patch<unknown>(`/api/projects/${projectId}/workflow/`, body);
+    return res.data;
+  },
+};
+
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));
 }

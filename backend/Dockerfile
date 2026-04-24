@@ -5,8 +5,14 @@ WORKDIR /app
 # Копирование requirements
 COPY requirements.txt .
 
-# Установка Python зависимостей
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Установка Python зависимостей через зеркало Alibaba Cloud
+RUN pip install --upgrade pip \
+    -i https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com && \
+    pip install -r requirements.txt \
+    -i https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com \
+    --default-timeout=120
 
 # Копирование исходного кода
 COPY . .

@@ -76,6 +76,7 @@ class User(Document):
     # Индексы для ускорения поиска и уникальности
     meta = {
         "collection": "users",
+        "strict": False,
         "indexes": [
             {"fields": ["email"], "unique": True},
             {"fields": ["username"], "unique": True},

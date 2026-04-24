@@ -37,6 +37,7 @@ import {
   ValidationBatchResolveRequest,
   ValidationBatchResolveResponse,
   ValidationQueueItem,
+  UserStats,
 } from "../types";
 
 
@@ -161,11 +162,15 @@ function extractDetail(err: unknown): string {
 // ------------------ Auth API ------------------
 export const authAPI = {
   async login(body: LoginRequest): Promise<AuthResponse> {
-    const res = await api.post<AuthResponse>("/api/auth/login/", body);
+    const res = await api.post<AuthResponse>("/api/auth/login/", body, {
+      headers: { "Content-Type": "application/json" },
+    });
     return res.data;
   },
   async register(body: RegisterRequest): Promise<AuthResponse> {
-    const res = await api.post<AuthResponse>("/api/auth/register/", body);
+    const res = await api.post<AuthResponse>("/api/auth/register/", body, {
+      headers: { "Content-Type": "application/json" },
+    });
     return res.data;
   },
   async me(): Promise<User> {
@@ -460,15 +465,15 @@ export const usersAPI = {
   },
 };
 
-// // ------------------ Stats API ------------------
-// export const statsAPI = {
-//   async myStats(): Promise<UserStats> {
-//     const res = await api.get<UserStats>("/api/users/me/stats/");
-//     return res.data;
-//   },
-// };
+// ------------------ Stats API ------------------
+export const statsAPI = {
+  async myStats(): Promise<UserStats> {
+    const res = await api.get<UserStats>("/api/users/me/stats/");
+    return res.data;
+  },
+};
 
-// // ------------------ Leaderboard API ------------------
+// ------------------ Leaderboard API ------------------
 // export const leaderboardAPI = {
 //   async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
 //     const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);

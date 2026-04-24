@@ -961,11 +961,11 @@ def project_overview(project: Project) -> dict:
         annotator_stats.append(
             {
                 "user_id": str(membership.user.id),
-                "username": membership.user.username,
-                "rating": membership.user.rating,
+                "username": getattr(membership.user, "username", ""),
+                "rating": getattr(membership.user, "rating", 0.0),
                 "open_assignments": sum(1 for assignment in user_assignments if assignment.status in [Assignment.STATUS_ASSIGNED, Assignment.STATUS_IN_PROGRESS, Assignment.STATUS_DRAFT]),
                 "submitted_assignments": sum(1 for assignment in user_assignments if assignment.status in [Assignment.STATUS_SUBMITTED, Assignment.STATUS_ACCEPTED, Assignment.STATUS_REJECTED]),
-                "conflict_rate": membership.user.conflict_rate,
+                "conflict_rate": getattr(membership.user, "conflict_rate", 0.0),
             }
         )
     return {

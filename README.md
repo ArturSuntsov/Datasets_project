@@ -201,242 +201,40 @@ curl -X POST http://localhost:8000/api/auth/register/ \
 
 ```bash
 cd backend
-
-# Установка зависимостей для тестов
-pip install -r requirements-test.txt
-
-# Запуск всех тестов
-pytest
-
-# Запуск с coverage отчетом
-pytest --cov=apps --cov-report=html
-
-# Запуск конкретного теста
-pytest tests/test_auth.py -v
-
-# Запуск с параллелизацией
-pytest -n auto
+pip install -r requirements.txt
+python manage.py runserver
 ```
-
-### Frontend тесты
-
-```bash
-cd frontend
-
-# Установка зависимостей
-npm install
-
-# Запуск всех тестов
-npm run test
-
-# Запуск в watch режиме
-npm run test:watch
-
-# Запуск с coverage отчетом
-npm run test:coverage
-
-# Запуск с UI
-npm run test:ui
-```
-
-### Покрытие кода
-
-| Компонент | Покрытие | Статус |
-|-----------|----------|--------|
-| Backend | 85% | ✅ |
-| Frontend | 80% | ✅ |
-
----
-
-## 🚢 Деплой
-
-### Production конфигурация
-
-```bash
-# Запуск production версии
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### Переменные окружения для production
-
-```bash
-# Обязательно установите в .env
-SECRET_KEY=your-super-secret-key-here
-DEBUG=False
-ALLOWED_HOSTS=your-domain.com
-CORS_ALLOWED_ORIGINS=https://your-domain.com
-```
-
-### Nginx конфигурация
-
-Пример конфигурации Nginx доступен в `nginx/nginx.conf`.
-
-### SSL/HTTPS
-
-Для диплома используются самоподписанные сертификаты:
-
-```bash
-# Генерация самоподписанного сертификата
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout nginx/ssl/server.key \
-  -out nginx/ssl/server.crt
-```
-
-Подробности см. в [docker-compose.prod.yml](./docker-compose.prod.yml).
-
----
-
-## 🎓 Для защиты диплома
-
-### Пояснительная записка
-
-См. документ [DIPLOMA_EXPLANATION.md](./DIPLOMA_EXPLANATION.md) с подробным описанием:
-
-- Решаемые бизнес-проблемы
-- Архитектурные решения
-- Описание модулей системы
-- Скриншоты интерфейса
-- Примеры использования API
-
-### Презентация
-
-Презентация для защиты находится в папке `/docs/presentation/`.
-
-### Ключевые особенности для демонстрации
-
-1. **Active Learning** — приоритизация сложных задач
-2. **AI-Assisted разметка** — предразметка моделью
-3. **Cross-Check QC** — перекрестная проверка аннотаций
-4. **Финансовая система** — выплаты исполнителям
-5. **JWT авторизация** — безопасный доступ к API
-
-### Сценарий демонстрации
-
-1. Регистрация заказчика и исполнителя
-2. Создание датасета и задач
-3. Разметка задачи исполнителем
-4. Cross-check проверка
-5. Выплата вознаграждения
-
----
-
-## 📁 Структура проекта
-
-```
-dataset-ai/
-├── backend/
-│   ├── apps/
-│   │   ├── users/           # Пользователи и авторизация
-│   │   ├── datasets_core/   # Управление датасетами
-│   │   ├── projects/        # Проекты и задачи
-│   │   ├── labeling/        # Разметка данных
-│   │   ├── quality/         # Контроль качества
-│   │   └── finance/         # Финансы и платежи
-│   ├── config/
-│   │   ├── settings.py      # Настройки Django
-│   │   ├── urls.py          # URL маршруты
-│   │   └── wsgi.py          # WSGI конфигурация
-│   ├── tests/
-│   │   ├── conftest.py      # Фикстуры pytest
-│   │   ├── test_auth.py     # Тесты авторизации
-│   │   ├── test_datasets.py # Тесты датасетов
-│   │   ├── test_tasks.py    # Тесты задач
-│   │   ├── test_quality.py  # Тесты качества
-│   │   └── test_finance.py  # Тесты финансов
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── components/      # UI компоненты
-│   │   ├── pages/           # Страницы приложения
-│   │   ├── services/        # API клиент
-│   │   ├── store/           # Zustand store
-│   │   ├── types/           # TypeScript типы
-│   │   └── tests/           # Тесты компонентов
-│   ├── vitest.config.ts
-│   ├── package.json
-│   └── Dockerfile
-├── nginx/
-│   └── nginx.conf           # Nginx конфигурация
-├── .github/workflows/
-│   ├── ci.yml               # CI/CD пайплайн
-│   └── deploy.yml           # Автодеплой
-├── docker-compose.yml
-├── docker-compose.prod.yml
-├── .env.example
-├── README.md                # Этот файл
-├── API.md                   # API документация
-├── ARCHITECTURE.md          # Описание архитектуры
-└── DIPLOMA_EXPLANATION.md   # Пояснения для защиты
-```
-
----
-
-## 🛠 Технологический стек
-
-### Backend
-
-- **Python 3.11** — язык программирования
-- **Django 4.2** — веб-фреймворк
-- **Django REST Framework** — REST API
-- **MongoEngine** — ODM для MongoDB
-- **MongoDB 7** — NoSQL база данных
-- **Redis 7** — кэш и брокер сообщений
-- **Celery 5** — очередь задач
-- **PyJWT** — JWT токены
 
 ### Frontend
 
-- **React 18** — UI библиотека
-- **TypeScript 5** — типизация
-- **Vite 5** — сборщик
-- **Tailwind CSS 3** — стилизация
-- **React Router 6** — роутинг
-- **Zustand 4** — state management
-- **React Query 5** — работа с API
-- **Axios** — HTTP клиент
-- **Vitest** — тестирование
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-### DevOps
+## Проверка end-to-end
 
-- **Docker** — контейнеризация
-- **Docker Compose** — оркестрация
-- **Nginx** — reverse proxy
-- **GitHub Actions** — CI/CD
-- **pytest** — тесты backend
-- **Vitest** — тесты frontend
+1. Создать проект с `project_type=cv`, `annotation_type=bbox`, заполнить `label_schema`.
+2. Загрузить 1-2 изображения и 1 видео в `ProjectDetailPage`.
+3. Нажать finalize и убедиться, что появились `work_items` и `assignments`.
+4. Под аннотатором выполнить submit нескольких assignment.
+5. При низком agreement проверить появление задач в `QualityPage`.
+6. Выполнить resolve ревью.
+7. Запустить экспорт:
+   - `?format=coco`
+   - `?format=yolo`
+   - `?format=both`
+8. Проверить, что в ответе есть `quality_report` и ожидаемые секции формата.
 
----
+## Ограничения текущей версии
 
-## 👥 Команда
+- Поддерживается только тип разметки `bbox`.
+- Экспорт возвращается как API payload (без отдельного архиватора файлов).
+- Обработка видео выполняется синхронно в API запросе.
 
-| Роль | Имя | Контакты |
-|------|-----|----------|
-| Full-stack разработчик | [Ваше Имя] | [your.email@example.com] |
-| Научный руководитель | [ФИО Руководителя] | [supervisor.email@university.edu] |
+## Ближайший roadmap
 
----
-
-## 📄 Лицензия
-
-MIT License — см. [LICENSE](./LICENSE)
-
----
-
-## 📞 Поддержка
-
-- **Документация:** [README.md](./README.md), [API.md](./API.md)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/dataset-ai/issues)
-- **Email:** [your.email@example.com]
-
----
-
-## 🙏 Благодарности
-
-- Кафедра [Название кафедры] за поддержку
-- Научному руководителю [ФИО] за консультации
-- Сообществу open-source за отличные инструменты
-
----
-
-*Последнее обновление: Март 2026*
+- Асинхронная обработка видео (queue/worker).
+- Экспорт в архив (`zip`) с файловой структурой dataset.
+- Поддержка дополнительных типов разметки (polygon/keypoints/tracking).

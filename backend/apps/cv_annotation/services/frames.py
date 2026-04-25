@@ -18,8 +18,13 @@ def extract_video_frames(file_uri: str, project_id: str, import_id: str, interva
     if not video_path.exists():
         raise FrameExtractionError(f"Video file not found: {file_uri}")
 
+    if interval_sec <= 0:
+        raise FrameExtractionError("Frame interval must be greater than zero")
+
     frames_dir = video_path.parent / f"frames_{Path(video_path).stem}"
     frames_dir.mkdir(parents=True, exist_ok=True)
+    for stale_frame in frames_dir.glob("frame_*.jpg"):
+        stale_frame.unlink(missing_ok=True)
     output_pattern = str(frames_dir / "frame_%06d.jpg")
     fps_expr = f"fps=1/{interval_sec}"
 

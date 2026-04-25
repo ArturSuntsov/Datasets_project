@@ -21,6 +21,10 @@ class ProjectSerializer(serializers.Serializer):
     project_type = serializers.ChoiceField(choices=[c[0] for c in Project.TYPE_CHOICES], default=Project.TYPE_CV)
     annotation_type = serializers.ChoiceField(choices=[c[0] for c in Project.ANNOTATION_CHOICES], default=Project.ANNOTATION_BBOX)
     instructions = serializers.CharField(required=False, allow_blank=True, default="")
+    instructions_file_uri = serializers.CharField(read_only=True)
+    instructions_file_name = serializers.CharField(read_only=True)
+    instructions_version = serializers.IntegerField(read_only=True)
+    instructions_updated_at = serializers.DateTimeField(read_only=True)
     label_schema = serializers.ListField(child=serializers.DictField(), required=False, default=list)
     participant_rules = serializers.DictField(required=False, default=dict)
     allowed_annotator_ids = serializers.ListField(child=serializers.CharField(), required=False, default=list)
@@ -60,6 +64,7 @@ class ProjectSerializer(serializers.Serializer):
 
         normalized: List[Dict[str, Any]] = []
         seen = set()
+        seen_colors = set()
 
         def _clean_str(raw: Any, max_len: int) -> str:
             if raw is None:
@@ -107,6 +112,11 @@ class ProjectSerializer(serializers.Serializer):
 
             description = _clean_str(item.get("description"), MAX_DESC_LEN)
             color = _clean_str(item.get("color"), 32) or None
+            if color:
+                color_key = color.lower()
+                if color_key in seen_colors:
+                    raise serializers.ValidationError(f"Duplicate label color: {color}")
+                seen_colors.add(color_key)
 
             rules = _clean_str_list(item.get("rules"), MAX_RULES) or None
 
@@ -236,6 +246,10 @@ class ProjectSerializer(serializers.Serializer):
             "project_type": instance.project_type,
             "annotation_type": instance.annotation_type,
             "instructions": instance.instructions,
+            "instructions_file_uri": getattr(instance, "instructions_file_uri", "") or "",
+            "instructions_file_name": getattr(instance, "instructions_file_name", "") or "",
+            "instructions_version": int(getattr(instance, "instructions_version", 0) or 0),
+            "instructions_updated_at": getattr(instance, "instructions_updated_at", None),
             "label_schema": instance.label_schema or [],
             "participant_rules": instance.participant_rules or {},
             "allowed_annotator_ids": [str(user.id) for user in instance.allowed_annotators or []],

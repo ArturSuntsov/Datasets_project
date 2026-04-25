@@ -39,8 +39,8 @@ export function LoginPage() {
     try {
       await login(body);
       navigate("/");
-    } catch (e) {
-      console.error("Login error:", e);
+    } catch (e: unknown) {
+      console.error("Login error:", (e as any)?.response?.data ?? e);
     }
   };
 

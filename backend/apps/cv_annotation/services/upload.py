@@ -31,6 +31,10 @@ def detect_asset_type(filename: str) -> str:
 
 
 def validate_upload(file_obj) -> str:
+    if not getattr(file_obj, "name", ""):
+        raise UploadValidationError("Uploaded file must include a name")
+    if getattr(file_obj, "size", None) is None:
+        raise UploadValidationError("Uploaded file size is not available")
     if file_obj.size > MAX_UPLOAD_SIZE:
         raise UploadValidationError(f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)} MB")
     return detect_asset_type(file_obj.name)

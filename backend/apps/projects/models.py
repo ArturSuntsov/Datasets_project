@@ -54,6 +54,10 @@ class Project(Document):
     project_type = StringField(required=True, choices=[c[0] for c in TYPE_CHOICES], default=TYPE_CV)
     annotation_type = StringField(required=True, choices=[c[0] for c in ANNOTATION_CHOICES], default=ANNOTATION_BBOX)
     instructions = StringField(default="")
+    instructions_file_uri = StringField(default="")
+    instructions_file_name = StringField(default="")
+    instructions_version = IntField(default=0, min_value=0)
+    instructions_updated_at = DateTimeField(null=True)
     label_schema = ListField(DictField(), default=list)
     participant_rules = DictField(default=dict)
 

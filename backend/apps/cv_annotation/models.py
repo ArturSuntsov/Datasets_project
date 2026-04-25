@@ -97,6 +97,10 @@ class WorkItem(Document):
     STATUS_IN_REVIEW = "in_review"
     STATUS_COMPLETED = "completed"
 
+    VALIDATION_PENDING = "pending"
+    VALIDATION_APPROVED = "approved"
+    VALIDATION_NEEDS_CHANGES = "needs_changes"
+
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
     status = StringField(required=True, default=STATUS_PENDING, choices=[STATUS_PENDING, STATUS_IN_REVIEW, STATUS_COMPLETED])
@@ -105,12 +109,24 @@ class WorkItem(Document):
     final_source = StringField(default="")
     review_required = BooleanField(default=False)
     review_status = StringField(default="none")
+    pre_annotations = DictField(default=dict)
+    pre_annotation_model = StringField(default="")
+    pre_annotation_confidence_threshold = FloatField(default=0.7)
+    workflow_meta = DictField(default=dict)
+    video_qc = DictField(default=dict)
+    validation_status = StringField(
+        default=VALIDATION_PENDING,
+        choices=[VALIDATION_PENDING, VALIDATION_APPROVED, VALIDATION_NEEDS_CHANGES],
+    )
+    validation_comment = StringField(default="")
+    validated_by = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+    validated_at = DateTimeField(null=True)
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
     meta = {
         "collection": "cv_work_items",
-        "indexes": ["project", "status", "review_status"],
+        "indexes": ["project", "status", "review_status", "validation_status"],
     }
 
     def save(self, *args, **kwargs):
@@ -125,15 +141,17 @@ class Assignment(Document):
     STATUS_SUBMITTED = "submitted"
     STATUS_ACCEPTED = "accepted"
     STATUS_REJECTED = "rejected"
+    STATUS_DISPUTED = "disputed"
 
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     work_item = ReferenceField(WorkItem, required=True, reverse_delete_rule=CASCADE)
     annotator = ReferenceField(User, required=True, reverse_delete_rule=CASCADE)
     order_index = IntField(default=0)
+    queue_position = IntField(default=0)
     status = StringField(
         required=True,
         default=STATUS_ASSIGNED,
-        choices=[STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_DRAFT, STATUS_SUBMITTED, STATUS_ACCEPTED, STATUS_REJECTED],
+        choices=[STATUS_ASSIGNED, STATUS_IN_PROGRESS, STATUS_DRAFT, STATUS_SUBMITTED, STATUS_ACCEPTED, STATUS_REJECTED, STATUS_DISPUTED],
     )
     quality_signals = DictField(default=dict)
     started_at = DateTimeField(null=True)
@@ -195,10 +213,52 @@ class ReviewRecord(Document):
     metrics = DictField(default=dict)
     dispute_reason = StringField(default="")
     resolution = DictField(default=dict)
+    golden_frame_ids = ListField(StringField(), default=list)
+    golden_total = IntField(default=0)
+    golden_errors = IntField(default=0)
+    golden_score = FloatField(default=0.0)
     created_at = DateTimeField(default=datetime.utcnow)
     resolved_at = DateTimeField(null=True)
 
     meta = {
         "collection": "cv_review_records",
         "indexes": ["project", "status", "reviewer"],
+    }
+
+
+class GoldenFrame(Document):
+    project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
+    frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
+    reference_annotation = DictField(required=True, default=dict)
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        "collection": "cv_golden_frames",
+        "indexes": ["project", "is_active"],
+    }
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.utcnow()
+        return super().save(*args, **kwargs)
+
+
+class SecurityEvent(Document):
+    EVENT_IMPORT_CLEANUP = "import_cleanup"
+    EVENT_PREANNOTATION = "preannotation"
+    EVENT_REVIEW_RESOLVE = "review_resolve"
+    EVENT_VIDEO_QC = "video_qc"
+    EVENT_ASSIGNMENT_DISTRIBUTION = "assignment_distribution"
+
+    project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
+    actor = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+    event_type = StringField(required=True)
+    severity = StringField(default="info")
+    payload = DictField(default=dict)
+    created_at = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        "collection": "cv_security_events",
+        "indexes": ["project", "event_type", "severity", "created_at"],
     }

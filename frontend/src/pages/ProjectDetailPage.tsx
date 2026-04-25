@@ -3,14 +3,21 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectsAPI, workflowAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
   const [uploadQueue, setUploadQueue] = useState<File[]>([]);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [exportPayload, setExportPayload] = useState<string | null>(null);
+  const [instructionFile, setInstructionFile] = useState<File | null>(null);
+  const [instructionUploadError, setInstructionUploadError] = useState<string | null>(null);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "both">("both");
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
@@ -21,6 +28,11 @@ export default function ProjectDetailPage() {
   const overviewQuery = useQuery({
     queryKey: ["project-overview", projectId],
     queryFn: () => workflowAPI.overview(projectId!),
+    enabled: !!projectId,
+  });
+  const securityEventsQuery = useQuery({
+    queryKey: ["project-security-events", projectId],
+    queryFn: () => workflowAPI.securityEvents(projectId!),
     enabled: !!projectId,
   });
 
@@ -42,11 +54,11 @@ export default function ProjectDetailPage() {
         setActiveImportId(result.import_id);
       }
       setUploadQueue([]);
-      setUploadError(null);
+      setUploadError(result?.asset_status === "failed" ? result.error_message || "Video was uploaded, but processing failed." : null);
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setUploadError(err.response?.data?.detail || err.response?.data?.error || "Upload failed");
+      setUploadError(err.response?.data?.detail || err.response?.data?.error || err.message || "Upload failed");
     },
   });
 
@@ -58,14 +70,51 @@ export default function ProjectDetailPage() {
       return workflowAPI.finalize(projectId, activeImportId);
     },
     onSuccess: () => {
+      setFinalizeError(null);
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (err: any) => {
+      setFinalizeError(err?.response?.data?.detail || err?.response?.data?.error || "Finalize failed");
     },
   });
 
   const exportMutation = useMutation({
-    mutationFn: async () => workflowAPI.export(projectId!),
+    mutationFn: async () => workflowAPI.export(projectId!, exportFormat),
     onSuccess: (payload) => {
       setExportPayload(JSON.stringify(payload, null, 2));
+    },
+  });
+
+  const exportArchiveMutation = useMutation({
+    mutationFn: async () => workflowAPI.exportArchive(projectId!, exportFormat),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `project-${projectId}-${exportFormat}.zip`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setArchiveError(null);
+    },
+    onError: (err: any) => {
+      setArchiveError(err?.response?.data?.detail || err?.message || "Archive export failed");
+    },
+  });
+
+  const instructionUploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !instructionFile) {
+        throw new Error("Выберите файл инструкции");
+      }
+      return projectsAPI.uploadInstructions(projectId, instructionFile);
+    },
+    onSuccess: async () => {
+      setInstructionFile(null);
+      setInstructionUploadError(null);
+      await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    },
+    onError: (err: any) => {
+      setInstructionUploadError(err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Не удалось загрузить инструкцию");
     },
   });
 
@@ -101,7 +150,10 @@ export default function ProjectDetailPage() {
             Настройка разметки
           </Link>
           <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-            {exportMutation.isPending ? "Exporting..." : "Export COCO JSON"}
+            {exportMutation.isPending ? "Exporting..." : "Export dataset"}
+          </button>
+          <button className="btn-secondary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
+            {exportArchiveMutation.isPending ? "Preparing zip..." : "Download zip"}
           </button>
         </div>
       </div>
@@ -116,8 +168,8 @@ export default function ProjectDetailPage() {
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.work_items?.total ?? 0}</div>
         </div>
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Pending review</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.reviews?.pending ?? 0}</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">Low-agreement requeue</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.assignments?.disputed ?? 0}</div>
         </div>
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Completion</div>
@@ -155,22 +207,41 @@ export default function ProjectDetailPage() {
             <button className="btn-secondary" type="button" onClick={() => finalizeMutation.mutate()} disabled={!activeImportId || finalizeMutation.isPending}>
               {finalizeMutation.isPending ? "Finalizing..." : "Finalize import"}
             </button>
+            <select
+              className="input-field w-auto"
+              value={exportFormat}
+              onChange={(event) => setExportFormat(event.target.value as "coco" | "yolo" | "both")}
+            >
+              <option value="both">Export: COCO + YOLO</option>
+              <option value="coco">Export: COCO</option>
+              <option value="yolo">Export: YOLO</option>
+            </select>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+            Assignments for annotators are created only after you click <span className="font-semibold">Finalize import</span>. Until then, the project will not appear in their annotation workspace.
           </div>
           {uploadError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{uploadError}</div> : null}
+          {finalizeError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{finalizeError}</div> : null}
           {lastUploadPreview ? (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
               <div>Processed assets: {lastUploadPreview.assets_processed}</div>
               <div>Failed assets: {lastUploadPreview.assets_failed}</div>
               <div>Frames detected: {lastUploadPreview.frames_total}</div>
+              {lastUploadPreview.cleanup ? (
+                <div className="mt-2">
+                  Cleanup: duplicates removed {lastUploadPreview.cleanup.duplicates_removed ?? 0}, invalid frames removed {lastUploadPreview.cleanup.invalid_frames_removed ?? 0}
+                </div>
+              ) : null}
               {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Errors: {lastUploadPreview.errors.join("; ")}</div> : null}
             </div>
           ) : null}
+          {archiveError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{archiveError}</div> : null}
         </div>
 
         <div className="card space-y-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Workflow configuration</h2>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Fixed defaults for the MVP vertical slice.</p>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Live settings for import, routing, AI suggestions, and review quality control.</p>
           </div>
           <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
             <div>Labels: {projectQuery.data.label_schema.map((item) => item.name).join(", ") || "—"}</div>
@@ -178,10 +249,55 @@ export default function ProjectDetailPage() {
             <div>Annotators per frame: {projectQuery.data.assignments_per_task}</div>
             <div>Agreement threshold: {projectQuery.data.agreement_threshold}</div>
             <div>IoU threshold: {projectQuery.data.iou_threshold}</div>
+            <div>Assignment scope: {String(projectQuery.data.participant_rules?.assignment_scope || "selected_only")}</div>
+            <div>AI pre-labeling: {projectQuery.data.participant_rules?.ai_prelabel_enabled === false ? "disabled" : "enabled"}</div>
+            <div>AI model: {String(projectQuery.data.participant_rules?.ai_model || "baseline-box-v1")}</div>
+            <div>AI confidence: {String(projectQuery.data.participant_rules?.ai_confidence_threshold ?? 0.7)}</div>
+            <div>Keyframe interval: {String(projectQuery.data.participant_rules?.video_keyframe_interval ?? 1)}</div>
+            <div>Tracking: {String(projectQuery.data.participant_rules?.tracking_algorithm || "CSRT")}</div>
+            <div>Task batch size: {String(projectQuery.data.participant_rules?.task_batch_size ?? 10)}</div>
+            <div>Min consecutive frames: {String(projectQuery.data.participant_rules?.min_sequence_size ?? 3)}</div>
+            <div>Annotator pool size: {projectQuery.data.allowed_annotator_ids.length}</div>
+            <div>Workflow batches created: {String(overview?.work_items?.workflow_batches_total ?? 0)}</div>
+            <div>Validation-ready frames: {String(overview?.work_items?.validation_ready_items ?? 0)}</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
             <div className="font-medium text-gray-900 dark:text-white">Instructions</div>
             <div className="mt-2 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{projectQuery.data.instructions || "No instructions added yet."}</div>
+            {projectQuery.data.instructions_file_uri ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-950">
+                <div className="text-gray-600 dark:text-gray-400">
+                  Файл: <a className="text-blue-600 hover:underline dark:text-blue-400" href={projectQuery.data.instructions_file_uri} target="_blank" rel="noreferrer">{projectQuery.data.instructions_file_name || "instruction"}</a>
+                </div>
+                <div className="text-gray-500 dark:text-gray-400">
+                  v{projectQuery.data.instructions_version ?? 0}{projectQuery.data.instructions_updated_at ? ` · ${new Date(projectQuery.data.instructions_updated_at).toLocaleString()}` : ""}
+                </div>
+              </div>
+            ) : null}
+            {(user?.role === "customer" || user?.role === "admin") ? (
+              <div className="mt-3 space-y-2">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Загрузить файл инструкции (PDF/DOCX/MD/TXT)</div>
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.md,.txt"
+                  onChange={(event) => setInstructionFile((event.target.files?.[0] as File | undefined) ?? null)}
+                  className="block w-full text-sm text-gray-600 dark:text-gray-300"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={!instructionFile || instructionUploadMutation.isPending}
+                    onClick={() => instructionUploadMutation.mutate()}
+                  >
+                    {instructionUploadMutation.isPending ? "Загрузка..." : "Загрузить новую версию"}
+                  </button>
+                </div>
+                {instructionUploadError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{instructionUploadError}</div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -219,6 +335,28 @@ export default function ProjectDetailPage() {
               ) : null}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Security / audit events</h2>
+          {securityEventsQuery.isFetching ? <span className="text-sm text-gray-500">Refreshing…</span> : null}
+        </div>
+        <div className="mt-4 space-y-2">
+          {(securityEventsQuery.data?.items ?? []).slice(0, 10).map((event) => (
+            <div key={event.id} className="rounded-lg border border-gray-200 p-3 text-xs dark:border-gray-800">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-gray-900 dark:text-white">{event.event_type}</span>
+                <span className="text-gray-500">{new Date(event.created_at).toLocaleString()}</span>
+              </div>
+              <div className="mt-1 text-gray-500 dark:text-gray-400">severity: {event.severity}</div>
+              <pre className="mt-2 max-h-24 overflow-auto rounded bg-gray-950 p-2 text-[11px] text-green-200">{JSON.stringify(event.payload, null, 2)}</pre>
+            </div>
+          ))}
+          {(securityEventsQuery.data?.items ?? []).length === 0 ? (
+            <div className="text-sm text-gray-500 dark:text-gray-400">No events yet.</div>
+          ) : null}
         </div>
       </div>
 

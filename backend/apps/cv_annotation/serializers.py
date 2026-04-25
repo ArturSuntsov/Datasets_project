@@ -26,10 +26,39 @@ class AssignmentSubmitSerializer(serializers.Serializer):
         boxes = value.get("boxes", [])
         if not isinstance(boxes, list):
             raise serializers.ValidationError("label_data.boxes must be a list")
-        for box in boxes:
+        assignment = self.context.get("assignment")
+        frame = assignment.work_item.frame if assignment else None
+        label_schema = assignment.project.label_schema if assignment else []
+        allowed_labels = {
+            str(item.get("name") or item.get("label") or "").strip()
+            for item in (label_schema or [])
+            if str(item.get("name") or item.get("label") or "").strip()
+        }
+        for index, box in enumerate(boxes):
+            if not isinstance(box, dict):
+                raise serializers.ValidationError(f"label_data.boxes[{index}] must be an object")
             for key in ("x", "y", "width", "height", "label"):
                 if key not in box:
                     raise serializers.ValidationError(f"Each box must include '{key}'")
+            try:
+                x = float(box["x"])
+                y = float(box["y"])
+                width = float(box["width"])
+                height = float(box["height"])
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f"label_data.boxes[{index}] coordinates must be numeric")
+            label = str(box["label"]).strip()
+            if not label:
+                raise serializers.ValidationError(f"label_data.boxes[{index}].label must not be empty")
+            if width <= 0 or height <= 0:
+                raise serializers.ValidationError(f"label_data.boxes[{index}] width/height must be greater than zero")
+            if frame:
+                if x < 0 or y < 0:
+                    raise serializers.ValidationError(f"label_data.boxes[{index}] must be inside frame bounds")
+                if x + width > frame.width or y + height > frame.height:
+                    raise serializers.ValidationError(f"label_data.boxes[{index}] exceeds frame bounds")
+            if allowed_labels and label not in allowed_labels:
+                raise serializers.ValidationError(f"label_data.boxes[{index}] uses unknown label '{label}'")
         return value
 
 
@@ -41,7 +70,56 @@ class ReviewResolveSerializer(serializers.Serializer):
         boxes = value.get("boxes", [])
         if not isinstance(boxes, list):
             raise serializers.ValidationError("resolution.boxes must be a list")
+        review = self.context.get("review")
+        frame = review.work_item.frame if review else None
+        label_schema = review.project.label_schema if review else []
+        allowed_labels = {
+            str(item.get("name") or item.get("label") or "").strip()
+            for item in (label_schema or [])
+            if str(item.get("name") or item.get("label") or "").strip()
+        }
+        for index, box in enumerate(boxes):
+            if not isinstance(box, dict):
+                raise serializers.ValidationError(f"resolution.boxes[{index}] must be an object")
+            for key in ("x", "y", "width", "height", "label"):
+                if key not in box:
+                    raise serializers.ValidationError(f"Each resolution box must include '{key}'")
+            try:
+                x = float(box["x"])
+                y = float(box["y"])
+                width = float(box["width"])
+                height = float(box["height"])
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f"resolution.boxes[{index}] coordinates must be numeric")
+            label = str(box["label"]).strip()
+            if not label:
+                raise serializers.ValidationError(f"resolution.boxes[{index}].label must not be empty")
+            if width <= 0 or height <= 0:
+                raise serializers.ValidationError(f"resolution.boxes[{index}] width/height must be greater than zero")
+            if frame:
+                if x < 0 or y < 0 or x + width > frame.width or y + height > frame.height:
+                    raise serializers.ValidationError(f"resolution.boxes[{index}] exceeds frame bounds")
+            if allowed_labels and label not in allowed_labels:
+                raise serializers.ValidationError(f"resolution.boxes[{index}] uses unknown label '{label}'")
         return value
+
+
+class ValidationBatchResolveSerializer(serializers.Serializer):
+    items = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    batch_comment = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_items(self, value):
+        normalized = []
+        for index, item in enumerate(value):
+            work_item_id = str(item.get("work_item_id") or "").strip()
+            decision = str(item.get("decision") or "").strip().lower()
+            comment = str(item.get("comment") or "").strip()
+            if not ObjectId.is_valid(work_item_id):
+                raise serializers.ValidationError(f"items[{index}].work_item_id is invalid")
+            if decision not in {"approve", "needs_changes"}:
+                raise serializers.ValidationError(f"items[{index}].decision must be 'approve' or 'needs_changes'")
+            normalized.append({"work_item_id": work_item_id, "decision": decision, "comment": comment})
+        return normalized
 
 
 class ParticipantSerializer(serializers.Serializer):

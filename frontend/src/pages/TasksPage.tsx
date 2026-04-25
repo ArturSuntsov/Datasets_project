@@ -11,16 +11,38 @@
 
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { tasksAPI } from "../services/api";
 import { Task, TaskStatus } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { KanbanBoard } from "../components/KanbanBoard";
+import { useAuthStore } from "../store";
 
 const STATUSES: TaskStatus[] = ["pending", "in_progress", "review", "completed", "rejected"];
 
 export function TasksPage() {
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
   const [filter, setFilter] = React.useState<TaskStatus | "all">("all");
+
+  if (user?.role === "annotator") {
+    return (
+      <div className="space-y-6">
+        <div className="card p-8 text-center">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Annotation projects moved</h1>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            CV assignments for annotators are no longer shown in the legacy Tasks board.
+          </p>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Open the project flow in <span className="font-medium">Annotation</span>, choose a project, read the instructions, and then continue frame by frame.
+          </p>
+          <Link to="/labeling" className="btn-primary mt-5 inline-block">
+            Open annotation projects
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const tasksQuery = useQuery({
     queryKey: ["tasks", filter],

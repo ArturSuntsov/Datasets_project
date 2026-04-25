@@ -1,89 +1,218 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { qualityAPI } from "../services/api";
+import { validationAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
+
+type DecisionMap = Record<string, { decision: "approve" | "needs_changes"; comment: string }>;
 
 export function QualityPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
-  const [datasetId, setDatasetId] = useState<string>("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedBatchKey, setSelectedBatchKey] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<DecisionMap>({});
+  const [batchComment, setBatchComment] = useState("");
 
-  // Получаем список датасетов (через quality API нет, используем заглушку)
-  const datasetsQuery = useQuery({
-    queryKey: ["quality-datasets"],
-    queryFn: async () => {
-      // Можно заменить на реальный запрос к datasetsAPI
-      const res = await fetch("/api/datasets/", {
-        headers: { Authorization: `Bearer ${localStorage.getItem("dataset_ai_access_token")}` }
-      });
-      return res.json();
-    },
+  const queueQuery = useQuery({
+    queryKey: ["validation-queue"],
+    queryFn: () => validationAPI.queue(),
     enabled: user?.role === "customer" || user?.role === "admin",
   });
 
-  const metricsQuery = useQuery({
-    queryKey: ["quality-metrics", datasetId],
-    queryFn: () => qualityAPI.metrics(datasetId),
-    enabled: !!datasetId,
+  const selectedQueueItem = useMemo(
+    () => queueQuery.data?.items.find((item) => `${item.project_id}:${item.task_batch_id}` === selectedBatchKey) ?? null,
+    [queueQuery.data?.items, selectedBatchKey]
+  );
+
+  useEffect(() => {
+    if (!selectedBatchKey && queueQuery.data?.items?.length) {
+      const first = queueQuery.data.items[0];
+      setSelectedBatchKey(`${first.project_id}:${first.task_batch_id}`);
+    }
+  }, [queueQuery.data, selectedBatchKey]);
+
+  const batchDetailQuery = useQuery({
+    queryKey: ["validation-batch-detail", selectedQueueItem?.project_id, selectedQueueItem?.task_batch_id],
+    queryFn: () => validationAPI.batchDetail(selectedQueueItem!.project_id, selectedQueueItem!.task_batch_id),
+    enabled: !!selectedQueueItem,
   });
 
-  const createReviewMutation = useMutation({
-    mutationFn: (body: any) => qualityAPI.createReview(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["quality-metrics", datasetId] });
-      alert("Review created successfully!");
+  useEffect(() => {
+    if (!batchDetailQuery.data) return;
+    const next: DecisionMap = {};
+    for (const item of batchDetailQuery.data.items) {
+      next[item.work_item_id] = {
+        decision: item.validation_status === "needs_changes" ? "needs_changes" : "approve",
+        comment: item.validation_comment || "",
+      };
+    }
+    setDecisions(next);
+    setBatchComment("");
+  }, [batchDetailQuery.data?.task_batch_id]);
+
+  const resolveMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedQueueItem) throw new Error("Пакет не выбран");
+      return validationAPI.resolveBatch(selectedQueueItem.project_id, selectedQueueItem.task_batch_id, {
+        items: Object.entries(decisions).map(([work_item_id, value]) => ({
+          work_item_id,
+          decision: value.decision,
+          comment: value.comment,
+        })),
+        batch_comment: batchComment,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["validation-queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["validation-batch-detail", selectedQueueItem?.project_id, selectedQueueItem?.task_batch_id] });
     },
   });
 
   if (user?.role !== "customer" && user?.role !== "admin") {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
-          Контроль качества
-        </h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Этот раздел доступен только заказчикам и администраторам.
-        </p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Валидация</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Этот раздел доступен владельцам проектов и администраторам.</p>
       </div>
     );
   }
 
-  const datasets = (datasetsQuery.data as any)?.items ?? [];
-  const metrics = (metricsQuery.data as any)?.items ?? [];
+  const queueItems = queueQuery.data?.items ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.88fr,1.12fr]">
       <div className="card">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          📊 Контроль качества
-        </h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Очередь валидации</h1>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Просмотр метрик качества и создание проверок разметки.
+          Здесь собраны пакеты кадров, которые прошли разметку и ждут приемки или отправки на доработку.
         </p>
+        {queueQuery.isLoading ? (
+          <div className="mt-6 flex justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : queueItems.length === 0 ? (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">
+            В очереди валидации пока нет готовых пакетов.
+          </div>
+        ) : (
+          <div className="mt-6 space-y-3">
+            {queueItems.map((item) => {
+              const key = `${item.project_id}:${item.task_batch_id}`;
+              const isSelected = selectedBatchKey === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedBatchKey(key)}
+                  className={`w-full rounded-lg border p-4 text-left transition ${isSelected ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-950"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.project_title}</div>
+                      <div className="mt-2 text-lg font-semibold text-gray-900 dark:text-white">Пакет #{item.batch_number}</div>
+                    </div>
+                    <span className="badge badge-warning">{item.frames_total} кадров</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <span>Принято: {item.approved_frames}</span>
+                    <span>На доработку: {item.needs_changes_frames}</span>
+                    <span>Флаги QC: {item.flagged_frames}</span>
+                    <span>Среднее согласие: {item.average_agreement.toFixed(2)}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Выбор датасета */}
-      <div className="card">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Выберите датасет
-        </label>
-        <select
-          value={datasetId}
-          onChange={(e) => setDatasetId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">— Выберите датасет —</option>
-          {datasets.map((ds: any) => (
-            <option key={ds.id} value={ds.id}>
-              {ds.name}
-            </option>
-          ))}
-        </select>
+      <div className="card space-y-4">
+        {!selectedQueueItem || !batchDetailQuery.data ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">Выберите пакет из очереди, чтобы открыть кадры и принять решение по каждому из них.</div>
+        ) : (
+          <>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{batchDetailQuery.data.project_title}</div>
+              <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Валидация пакета #{batchDetailQuery.data.batch_number}</h2>
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Кадров в пакете: {batchDetailQuery.data.frames_total}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {batchDetailQuery.data.items.map((item, index) => {
+                const state = decisions[item.work_item_id] ?? { decision: "approve" as const, comment: "" };
+                const flagged = Boolean(item.video_qc?.flag_for_review);
+                return (
+                  <div key={item.work_item_id} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-white">Кадр {index + 1} / {batchDetailQuery.data.items.length}</div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          №{item.frame_number} | bbox: {item.final_box_count ?? 0} | agreement: {Number(item.agreement_score ?? 0).toFixed(2)}
+                        </div>
+                      </div>
+                      {flagged ? <span className="badge badge-warning">QC flag</span> : <span className="badge badge-success">OK</span>}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[220px,1fr]">
+                      <img src={item.frame_url} alt={`Кадр ${item.frame_number}`} className="h-40 w-full rounded-lg border border-gray-200 object-contain dark:border-gray-800" />
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-900">
+                          <div className="font-medium text-gray-900 dark:text-white">Результат разметки</div>
+                          <pre className="mt-2 max-h-32 overflow-auto text-[11px] text-gray-700 dark:text-gray-300">{JSON.stringify(item.final_annotation ?? { boxes: [] }, null, 2)}</pre>
+                        </div>
+                        {flagged ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            Межкадровая проверка обнаружила подозрительное расхождение. Такой кадр удобно отправлять на доработку.
+                          </div>
+                        ) : null}
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-[220px,1fr]">
+                          <select
+                            className="input-field"
+                            value={state.decision}
+                            onChange={(event) =>
+                              setDecisions((current) => ({
+                                ...current,
+                                [item.work_item_id]: { ...state, decision: event.target.value as "approve" | "needs_changes" },
+                              }))
+                            }
+                          >
+                            <option value="approve">Принять</option>
+                            <option value="needs_changes">На доработку</option>
+                          </select>
+                          <input
+                            className="input-field"
+                            value={state.comment}
+                            onChange={(event) =>
+                              setDecisions((current) => ({
+                                ...current,
+                                [item.work_item_id]: { ...state, comment: event.target.value },
+                              }))
+                            }
+                            placeholder="Комментарий по кадру"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Комментарий к пакету</div>
+              <textarea className="input-field min-h-[110px]" value={batchComment} onChange={(event) => setBatchComment(event.target.value)} placeholder="Общий комментарий по пакету" />
+            </div>
+
+            <button className="btn-primary" type="button" onClick={() => resolveMutation.mutate()} disabled={resolveMutation.isPending}>
+              {resolveMutation.isPending ? "Сохраняем..." : "Сохранить решения по пакету"}
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Метрики качества */}
+      {/* Метрики качества
       {datasetId && (
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -122,7 +251,7 @@ export function QualityPage() {
             </div>
           )}
         </div>
-      )}
+      )} */}
     </div>
   );
 }

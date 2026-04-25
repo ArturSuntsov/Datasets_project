@@ -1,10 +1,7 @@
 import { create } from "zustand";
 import { AuthResponse, LoginRequest, RegisterRequest, User } from "../types";
 import { authAPI, clearTokens, getAccessToken, getRefreshToken, setTokens } from "../services/api";
-import { QueryClient } from "@tanstack/react-query";
-
-// ✅ Создаём queryClient для очистки кэша при выходе
-const queryClient = new QueryClient();
+import { queryClient } from "../queryClient";
 
 type AuthState = {
   user: User | null;
@@ -31,11 +28,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (body) => {
     set({ loading: true, error: null });
+    queryClient.clear();
     const res: AuthResponse = await authAPI.login(body);
     setTokens(res.access, res.refresh ?? getRefreshToken());
-
+    queryClient.clear();
     set({
-      user: res.user,
+      user: res.user ?? null,
       accessToken: res.access,
       refreshToken: res.refresh ?? getRefreshToken(),
       isAuthenticated: true,
@@ -48,12 +46,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const res: AuthResponse = await authAPI.register(body);
-      
       const user: User = res.user ?? {
-        id: (res as any).user_id ?? '',
+        id: (res as any).user_id ?? "",
         email: (res as any).email ?? body.email,
         username: (res as any).username ?? body.username,
-        role: (res as any).role ?? body.role ?? 'customer',
+        role: (res as any).role ?? body.role ?? "customer",
       };
       
       console.log('📦 [useAuthStore.register] Регистрация успешна:', { userId: user.id });
@@ -61,9 +58,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (res.access) {
         setTokens(res.access, res.refresh ?? getRefreshToken());
       }
-
+      queryClient.clear();
       set({
-        user: user,
+        user,
         accessToken: res.access ?? getAccessToken(),
         refreshToken: res.refresh ?? getRefreshToken(),
         isAuthenticated: true,
@@ -98,9 +95,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const user = await authAPI.me();
+      queryClient.clear();
       set({ user, isAuthenticated: true, loading: false });
     } catch (e) {
       clearTokens();
+      queryClient.clear();
       set({
         user: null,
         accessToken: null,

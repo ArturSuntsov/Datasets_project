@@ -4,6 +4,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 
+# Устанавливаем ffmpeg для извлечения кадров из видео
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Используем зеркало Alibaba Cloud (Китай) - обычно не блокируется
 RUN pip install --upgrade pip \
     -i https://mirrors.aliyun.com/pypi/simple/ \

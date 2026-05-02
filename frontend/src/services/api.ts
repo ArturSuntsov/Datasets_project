@@ -286,6 +286,10 @@ export const annotatorAPI = {
     const res = await api.get<{ assignment_id: string; source: string }>(`/api/annotator/projects/${projectId}/next-assignment/`);
     return res.data;
   },
+  async previousAssignment(projectId: string): Promise<{ assignment_id: string; source: string }> {
+    const res = await api.get<{ assignment_id: string; source: string }>(`/api/annotator/projects/${projectId}/previous-assignment/`);
+    return res.data;
+  },
   async detail(assignmentId: string): Promise<AssignmentDetail> {
     const res = await api.get<AssignmentDetail>(`/api/annotator/assignments/${assignmentId}/`);
     return res.data;

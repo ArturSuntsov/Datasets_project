@@ -43,6 +43,13 @@ export default function AnnotationCanvas({
   selectedBoxIndex,
   onSelectedBoxIndexChange,
   onBoxesChange,
+  onPreviousFrame,
+  onNextFrame,
+  onPreviousFrameWithAnnotations,
+  onNextFrameWithAnnotations,
+  onPreviousEmptyFrame,
+  onNextEmptyFrame,
+  onFitToViewport,
 }: {
   imageUrl: string;
   value: BoundingBox[];
@@ -51,6 +58,13 @@ export default function AnnotationCanvas({
   selectedBoxIndex: number | null;
   onSelectedBoxIndexChange: (index: number | null) => void;
   onBoxesChange: (boxes: BoundingBox[]) => void;
+  onPreviousFrame?: () => void;
+  onNextFrame?: () => void;
+  onPreviousFrameWithAnnotations?: () => void;
+  onNextFrameWithAnnotations?: () => void;
+  onPreviousEmptyFrame?: () => void;
+  onNextEmptyFrame?: () => void;
+  onFitToViewport?: () => void;
 }) {
   const stageRef = useRef<any>(null);
   const contentRef = useRef<any>(null);
@@ -63,12 +77,167 @@ export default function AnnotationCanvas({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [viewportWidth, setViewportWidth] = useState(1100);
   const [viewportHeight, setViewportHeight] = useState(760);
-  const { image, loading, error } = useImageLoader(imageUrl);
+  const [history, setHistory] = useState<BoundingBox[][]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [copiedBox, setCopiedBox] = useState<BoundingBox | null>(null);
+   const { image, loading, error } = useImageLoader(imageUrl);
 
   const maxHeight = 760;
 
   const imageWidth = image?.width || 1;
   const imageHeight = image?.height || 1;
+
+  // Auto-focus the canvas when it mounts or when image loads
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.focus();
+    }
+  }, [containerRef, image]);
+
+   // Undo/redo functionality
+   useEffect(() => {
+     // Save current state to history when boxes change
+     // But only if we're not currently undoing/redoing (to avoid polluting history)
+     if (historyIndex < history.length - 1) {
+       // Truncate forward history
+       setHistory(history.slice(0, historyIndex + 1));
+     }
+     
+     // Add current state to history
+     setHistory(prev => [...prev, value]);
+     setHistoryIndex(prev => Math.min(prev + 1, 19)); // Limit to 20 actions
+   }, [value, history, historyIndex]);
+
+  // Keyboard event handling
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ignore if focus is on input, textarea, or select elements
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+        return;
+      }
+
+      // Handle modifier keys
+      const ctrlKey = event.ctrlKey;
+      const shiftKey = event.shiftKey;
+      const key = event.key;
+
+      // Navigation (highest priority)
+      if (key === 'F') {
+        event.preventDefault();
+        onPreviousFrame?.();
+        return;
+      }
+      if (key === 'D') {
+        event.preventDefault();
+        onNextFrame?.();
+        return;
+      }
+      if (key === 'ArrowLeft') {
+        event.preventDefault();
+        onPreviousFrameWithAnnotations?.();
+        return;
+      }
+      if (key === 'ArrowRight') {
+        event.preventDefault();
+        onNextFrameWithAnnotations?.();
+        return;
+      }
+      if (ctrlKey && key === 'ArrowLeft') {
+        event.preventDefault();
+        onPreviousEmptyFrame?.();
+        return;
+      }
+      if (ctrlKey && key === 'ArrowRight') {
+        event.preventDefault();
+        onNextEmptyFrame?.();
+        return;
+      }
+
+      // Medium priority actions
+      if (key === 'Delete' && selectedBoxIndex !== null) {
+        event.preventDefault();
+        onBoxesChange(value.filter((_, index) => index !== selectedBoxIndex));
+        onSelectedBoxIndexChange(null);
+        return;
+      }
+      if (key === 'Escape') {
+        event.preventDefault();
+        // Cancel current drawing action / deselect all
+        setDrawing(false);
+        setStartPos(null);
+        setCurrentPos(null);
+        onSelectedBoxIndexChange(null);
+        return;
+      }
+      if (ctrlKey && key === 'c' && selectedBoxIndex !== null) {
+        event.preventDefault();
+        setCopiedBox(value[selectedBoxIndex]);
+        return;
+      }
+      if (ctrlKey && key === 'v' && copiedBox) {
+        event.preventDefault();
+        onBoxesChange([...value, copiedBox]);
+        onSelectedBoxIndexChange(value.length); // Select the newly pasted box
+        return;
+      }
+      if (ctrlKey && key === 'z') {
+        event.preventDefault();
+        // Undo
+        if (historyIndex > 0) {
+          setHistoryIndex(prev => prev - 1);
+          onBoxesChange(history[historyIndex - 1]);
+          // Update selected box index to maintain selection if possible
+          const newBoxes = history[historyIndex - 1];
+          if (selectedBoxIndex !== null && selectedBoxIndex < newBoxes.length) {
+            onSelectedBoxIndexChange(selectedBoxIndex);
+          } else if (newBoxes.length > 0) {
+            onSelectedBoxIndexChange(0);
+          } else {
+            onSelectedBoxIndexChange(null);
+          }
+        }
+        return;
+      }
+      if (ctrlKey && shiftKey && key === 'Z') {
+        event.preventDefault();
+        // Redo
+        if (historyIndex < history.length - 1) {
+          setHistoryIndex(prev => prev + 1);
+          onBoxesChange(history[historyIndex + 1]);
+          // Update selected box index to maintain selection if possible
+          const newBoxes = history[historyIndex + 1];
+          if (selectedBoxIndex !== null && selectedBoxIndex < newBoxes.length) {
+            onSelectedBoxIndexChange(selectedBoxIndex);
+          } else if (newBoxes.length > 0) {
+            onSelectedBoxIndexChange(0);
+          } else {
+            onSelectedBoxIndexChange(null);
+          }
+        }
+        return;
+      }
+      if (shiftKey && key === 'N' && selectedBoxIndex !== null) {
+        event.preventDefault();
+        // Redraw selected box with same properties
+        const box = value[selectedBoxIndex];
+        onBoxesChange([
+          ...value.slice(0, selectedBoxIndex),
+          { ...box }, // Create a new object with same properties
+          ...value.slice(selectedBoxIndex + 1)
+        ]);
+        return;
+      }
+       if (key === 'F1') {
+         event.preventDefault();
+         onFitToViewport?.();
+         return;
+       }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [value, selectedBoxIndex, onBoxesChange, onSelectedBoxIndexChange, copiedBox]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -144,53 +313,96 @@ export default function AnnotationCanvas({
     };
   };
 
-  const handleMouseDown = (event: any) => {
-    if (tool === "pan") return;
-    const targetClassName = event.target?.className;
-    if (targetClassName && targetClassName !== "Stage" && targetClassName !== "Image") return;
-    if (!currentLabel) return;
-    const pos = getPointerOnCanvas();
-    if (!pos) return;
-    setDrawing(true);
-    setStartPos(pos);
-    setCurrentPos(pos);
-    onSelectedBoxIndexChange(null);
-  };
+   const handleMouseDown = (event: any) => {
+     // Extract the native event from Konva event object
+     const nativeEvent = event.evt || event;
+     
+     console.log('handleMouseDown called:', {
+       button: nativeEvent.button,
+       tool: tool,
+       targetClassName: event.target?.className,
+       clientX: nativeEvent.clientX,
+       clientY: nativeEvent.clientY
+     });
+     
+     // Right click: enter pan mode
+     if (nativeEvent.button === 2) {
+       console.log('Right mouse button down - entering pan mode');
+       if (nativeEvent.preventDefault) nativeEvent.preventDefault();
+       if (nativeEvent.stopPropagation) nativeEvent.stopPropagation();
+       setTool("pan");
+       return;
+     }
+     
+     // If already in pan mode, ignore further mouse events for drawing/selection
+     if (tool === "pan") {
+       console.log('Already in pan mode, ignoring mouse down for drawing');
+       return;
+     }
+     
+     // Left click: proceed with drawing/selection logic
+     const targetClassName = event.target?.className;
+     if (targetClassName && targetClassName !== "Stage" && targetClassName !== "Image") {
+       console.log('Ignoring mouse down on non-stage/image element:', targetClassName);
+       return;
+     }
+     if (!currentLabel) {
+       console.log('No current label, ignoring mouse down');
+       return;
+     }
+     const pos = getPointerOnCanvas();
+     if (!pos) {
+       console.log('Could not get pointer position, ignoring mouse down');
+       return;
+     }
+     console.log('Starting drawing at:', pos);
+     setDrawing(true);
+     setStartPos(pos);
+     setCurrentPos(pos);
+     onSelectedBoxIndexChange(null);
+   };
 
-  const handleMouseMove = () => {
-    if (!drawing) return;
-    const pos = getPointerOnCanvas();
-    if (!pos) return;
-    setCurrentPos(pos);
-  };
+   const handleMouseMove = () => {
+     if (tool === "pan") return;
+     if (!drawing) return;
+     const pos = getPointerOnCanvas();
+     if (!pos) return;
+     setCurrentPos(pos);
+   };
 
-  const handleMouseUp = () => {
-    if (!drawing || !startPos || !currentPos || !currentLabel) {
-      setDrawing(false);
-      setStartPos(null);
-      setCurrentPos(null);
-      return;
-    }
-
-    const start = toImageCoords(startPos.x, startPos.y);
-    const end = toImageCoords(currentPos.x, currentPos.y);
-    const nextBox: BoundingBox = {
-      x: Math.min(start.x, end.x),
-      y: Math.min(start.y, end.y),
-      width: Math.abs(end.x - start.x),
-      height: Math.abs(end.y - start.y),
-      label: currentLabel,
-    };
-
-    if (nextBox.width > 4 && nextBox.height > 4) {
-      onBoxesChange([...value, nextBox]);
-      onSelectedBoxIndexChange(value.length);
-    }
-
-    setDrawing(false);
-    setStartPos(null);
-    setCurrentPos(null);
-  };
+   const handleMouseUp = () => {
+     // Switch back to draw tool when releasing right mouse button
+     if (tool === "pan") {
+       setTool("draw");
+       return;
+     }
+ 
+     if (!drawing || !startPos || !currentPos || !currentLabel) {
+       setDrawing(false);
+       setStartPos(null);
+       setCurrentPos(null);
+       return;
+     }
+ 
+     const start = toImageCoords(startPos.x, startPos.y);
+     const end = toImageCoords(currentPos.x, currentPos.y);
+     const nextBox: BoundingBox = {
+       x: Math.min(start.x, end.x),
+       y: Math.min(start.y, end.y),
+       width: Math.abs(end.x - start.x),
+       height: Math.abs(end.y - start.y),
+       label: currentLabel,
+     };
+ 
+     if (nextBox.width > 4 && nextBox.height > 4) {
+       onBoxesChange([...value, nextBox]);
+       onSelectedBoxIndexChange(value.length);
+     }
+ 
+     setDrawing(false);
+     setStartPos(null);
+     setCurrentPos(null);
+   };
 
   const updateDraggedBox = (index: number, nextX: number, nextY: number) => {
     onBoxesChange(
@@ -282,17 +494,26 @@ export default function AnnotationCanvas({
         </div>
       </div>
 
-      <div ref={containerRef} className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950">
-        <Stage
-          ref={stageRef}
-          width={stageWidth}
-          height={stageHeight}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
-          className={tool === "pan" ? "cursor-grab" : "cursor-crosshair"}
-        >
+       <div
+         ref={containerRef}
+         tabIndex={0}
+         onClick={() => containerRef.current?.focus()}
+         onContextMenu={(e) => e.preventDefault()}
+         className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950"
+       >
+         <Stage
+           ref={stageRef}
+           width={stageWidth}
+           height={stageHeight}
+           onMouseDown={handleMouseDown}
+           onMouseMove={handleMouseMove}
+           onMouseUp={handleMouseUp}
+           onWheel={handleWheel}
+           className={tool === "pan" ? "cursor-grab" : "cursor-crosshair"}
+           // Prevent mouse events from interfering with panning
+           onMouseEnter={tool === "pan" ? () => { /* Do nothing */ } : undefined}
+           onMouseLeave={tool === "pan" ? () => { /* Do nothing */ } : undefined}
+         >
           <Layer>
             <Group
               ref={contentRef}
@@ -309,28 +530,41 @@ export default function AnnotationCanvas({
                 const color = labelColorMap.get(box.label) || "#ef4444";
                 const isSelected = selectedBoxIndex === index;
                 return (
-                  <Group
-                    key={`${box.label}-${index}`}
-                    draggable={tool === "draw"}
-                    onClick={(event) => {
-                      event.cancelBubble = true;
-                      onSelectedBoxIndexChange(index);
-                    }}
-                    onTap={(event) => {
-                      event.cancelBubble = true;
-                      onSelectedBoxIndexChange(index);
-                    }}
-                    onDragEnd={(event) => updateDraggedBox(index, event.target.x(), event.target.y())}
-                    x={canvasBox.x}
-                    y={canvasBox.y}
-                  >
-                    <Rect
-                      width={canvasBox.width}
-                      height={canvasBox.height}
-                      stroke={color}
-                      strokeWidth={isSelected ? 3 : 2}
-                      dash={isSelected ? [8, 4] : undefined}
-                    />
+               <Group
+                     key={`${box.label}-${index}`}
+                     draggable={tool === "draw"}
+                     onClick={(event) => {
+                       // Don't select boxes when in pan mode or right-clicking
+                       if (tool === "pan" || event.button === 2) {
+                         return;
+                       }
+                       event.cancelBubble = true;
+                       onSelectedBoxIndexChange(index);
+                     }}
+                     onTap={(event) => {
+                       // Don't select boxes when in pan mode or right-clicking
+                       if (tool === "pan" || event.button === 2) {
+                         return;
+                       }
+                       event.cancelBubble = true;
+                       onSelectedBoxIndexChange(index);
+                     }}
+                     onDragEnd={(event) => {
+                       // Only update box position when in draw mode
+                       if (tool === "draw") {
+                         updateDraggedBox(index, event.target.x(), event.target.y());
+                       }
+                     }}
+                     x={canvasBox.x}
+                     y={canvasBox.y}
+                   >
+                     <Rect
+                       width={canvasBox.width}
+                       height={canvasBox.height}
+                       stroke={color}
+                       strokeWidth={isSelected ? 1.5 : 2}
+                       dash={isSelected ? [8, 4] : undefined}
+                     />
                     <Text y={-18} text={box.label} fill={color} fontSize={14} fontStyle="bold" />
                   </Group>
                 );

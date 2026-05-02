@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AnnotationCanvas from "../components/AnnotationCanvas";
@@ -131,9 +131,147 @@ export default function AnnotationPage() {
     );
   }
 
-  const frame = assignmentQuery.data.frame;
-  const workflowMeta = assignmentQuery.data.workflow_meta;
-  const batch = assignmentQuery.data.task_batch;
+   const frame = assignmentQuery.data.frame;
+   const workflowMeta = assignmentQuery.data.workflow_meta;
+   const batch = assignmentQuery.data.task_batch;
+
+   // Navigation handlers for hotkeys
+   const handlePreviousFrame = async () => {
+     try {
+       const prev = await annotatorAPI.previousAssignment(assignmentQuery.data!.project_id);
+       navigate(`/labeling/assignments/${prev.assignment_id}`);
+     } catch (error) {
+       console.error('Failed to navigate to previous assignment:', error);
+     }
+   };
+
+   const handleNextFrame = async () => {
+     try {
+       const next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+       navigate(`/labeling/assignments/${next.assignment_id}`);
+     } catch (error) {
+       console.error('Failed to navigate to next assignment:', error);
+     }
+   };
+
+    const handlePreviousFrameWithAnnotations = async () => {
+      try {
+        let currentAssignmentId = assignmentQuery.data?.assignment_id;
+        let maxAttempts = 10; // Prevent infinite loop
+        let attempts = 0;
+        
+        while (attempts < maxAttempts) {
+          const prev = await annotatorAPI.previousAssignment(assignmentQuery.data!.project_id);
+          if (!prev.assignment_id) break;
+          
+          const prevData = await annotatorAPI.detail(prev.assignment_id);
+          if (prevData.draft?.boxes?.length > 0 || prevData.pre_annotations?.boxes?.length > 0) {
+            navigate(`/labeling/assignments/${prev.assignment_id}`);
+            return;
+          }
+          
+          // Move to the previous assignment for next iteration
+          attempts++;
+          if (attempts >= maxAttempts) break;
+        }
+        
+        // If we couldn't find an assignment with annotations, go to the previous one anyway
+        const prev = await annotatorAPI.previousAssignment(assignmentQuery.data!.project_id);
+        if (prev.assignment_id) {
+          navigate(`/labeling/assignments/${prev.assignment_id}`);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to previous assignment with annotations:', error);
+      }
+    };
+
+    const handleNextFrameWithAnnotations = async () => {
+      try {
+        let currentAssignmentId = assignmentQuery.data?.assignment_id;
+        let maxAttempts = 10; // Prevent infinite loop
+        let attempts = 0;
+        
+        while (attempts < maxAttempts) {
+          const next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+          if (!next.assignment_id) break;
+          
+          const nextData = await annotatorAPI.detail(next.assignment_id);
+          if (nextData.draft?.boxes?.length > 0 || nextData.pre_annotations?.boxes?.length > 0) {
+            navigate(`/labeling/assignments/${next.assignment_id}`);
+            return;
+          }
+          
+          // Move to the next assignment for next iteration
+          attempts++;
+          if (attempts >= maxAttempts) break;
+        }
+        
+        // If we couldn't find an assignment with annotations, go to the next one anyway
+        const next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+        if (next.assignment_id) {
+          navigate(`/labeling/assignments/${next.assignment_id}`);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to next assignment with annotations:', error);
+      }
+    };
+
+    const handlePreviousEmptyFrame = async () => {
+      try {
+        let maxAttempts = 20; // Prevent infinite loop
+        let attempts = 0;
+        let prev = await annotatorAPI.previousAssignment(assignmentQuery.data!.project_id);
+        
+        while (prev.assignment_id && attempts < maxAttempts) {
+          const prevData = await annotatorAPI.detail(prev.assignment_id);
+          if ((prevData.draft?.boxes?.length || 0) === 0 && (prevData.pre_annotations?.boxes?.length || 0) === 0) {
+            navigate(`/labeling/assignments/${prev.assignment_id}`);
+            return;
+          }
+          attempts++;
+          prev = await annotatorAPI.previousAssignment(assignmentQuery.data!.project_id);
+        }
+        
+        // If we couldn't find an empty assignment, go to the previous one anyway
+        if (prev.assignment_id) {
+          navigate(`/labeling/assignments/${prev.assignment_id}`);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to previous empty assignment:', error);
+      }
+    };
+
+    const handleNextEmptyFrame = async () => {
+      try {
+        // Find next frame with no annotations
+        let maxAttempts = 20; // Prevent infinite loop
+        let attempts = 0;
+        let next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+        
+        while (next.assignment_id && attempts < maxAttempts) {
+          const nextData = await annotatorAPI.detail(next.assignment_id);
+          if ((nextData.draft?.boxes?.length || 0) === 0 && (nextData.pre_annotations?.boxes?.length || 0) === 0) {
+            navigate(`/labeling/assignments/${next.assignment_id}`);
+            return;
+          }
+          attempts++;
+          next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+        }
+        
+        // If we couldn't find an empty assignment, go to the next one anyway
+        if (next.assignment_id) {
+          navigate(`/labeling/assignments/${next.assignment_id}`);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to next empty assignment:', error);
+      }
+    };
+
+   const handleFitToViewport = () => {
+     // Reset zoom and pan to fit image in viewport
+     setZoom(1);
+     setPan({ x: imageOffset.x, y: imageOffset.y });
+   };
 
   return (
     <div className="space-y-6">
@@ -222,15 +360,22 @@ export default function AnnotationPage() {
               </div>
             ) : null}
 
-            <AnnotationCanvas
-              imageUrl={assignmentQuery.data.frame_url}
-              value={boxes}
-              labels={labels}
-              currentLabel={selectedLabel}
-              selectedBoxIndex={selectedBoxIndex}
-              onSelectedBoxIndexChange={setSelectedBoxIndex}
-              onBoxesChange={setBoxes}
-            />
+       <AnnotationCanvas
+               imageUrl={assignmentQuery.data.frame_url}
+               value={boxes}
+               labels={labels}
+               currentLabel={selectedLabel}
+               selectedBoxIndex={selectedBoxIndex}
+               onSelectedBoxIndexChange={setSelectedBoxIndex}
+               onBoxesChange={setBoxes}
+               onPreviousFrame={handlePreviousFrame}
+               onNextFrame={handleNextFrame}
+               onPreviousFrameWithAnnotations={handlePreviousFrameWithAnnotations}
+               onNextFrameWithAnnotations={handleNextFrameWithAnnotations}
+               onPreviousEmptyFrame={handlePreviousEmptyFrame}
+               onNextEmptyFrame={handleNextEmptyFrame}
+               onFitToViewport={handleFitToViewport}
+             />
           </div>
         </section>
 

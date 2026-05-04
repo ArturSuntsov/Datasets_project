@@ -12,12 +12,11 @@ export default function ProjectDetailPage() {
   const [uploadQueue, setUploadQueue] = useState<File[]>([]);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [exportPayload, setExportPayload] = useState<string | null>(null);
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUploadError, setInstructionUploadError] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
-  const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "both">("both");
-  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [exportFormat, setExportFormat] = useState<"json" | "csv" | "photo">("json");
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
@@ -78,26 +77,20 @@ export default function ProjectDetailPage() {
     },
   });
 
-  const exportMutation = useMutation({
-    mutationFn: async () => workflowAPI.export(projectId!, exportFormat),
-    onSuccess: (payload) => {
-      setExportPayload(JSON.stringify(payload, null, 2));
-    },
-  });
-
-  const exportArchiveMutation = useMutation({
-    mutationFn: async () => workflowAPI.exportArchive(projectId!, exportFormat),
-    onSuccess: (blob) => {
+  const exportDatasetMutation = useMutation({
+    mutationFn: async () => projectsAPI.exportDataset(projectId!, exportFormat),
+    onSuccess: (blob: Blob) => {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `project-${projectId}-${exportFormat}.zip`;
+      const extension = exportFormat === "photo" ? "zip" : exportFormat;
+      anchor.download = `project-${projectId}-${exportFormat}.${extension}`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setArchiveError(null);
+      setExportError(null);
     },
     onError: (err: any) => {
-      setArchiveError(err?.response?.data?.detail || err?.message || "Archive export failed");
+      setExportError(err?.response?.data?.detail || err?.message || "Export failed");
     },
   });
 
@@ -149,11 +142,17 @@ export default function ProjectDetailPage() {
           <Link to={`/projects/${projectId}/workflow`} className="btn-secondary">
             Настройка разметки
           </Link>
-          <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-            {exportMutation.isPending ? "Exporting..." : "Export dataset"}
-          </button>
-          <button className="btn-secondary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
-            {exportArchiveMutation.isPending ? "Preparing zip..." : "Download zip"}
+          <select
+            className="input-field w-auto"
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value as "json" | "csv" | "photo")}
+          >
+            <option value="json">JSON</option>
+            <option value="csv">CSV</option>
+            <option value="photo">Фото (ZIP)</option>
+          </select>
+          <button className="btn-secondary" onClick={() => exportDatasetMutation.mutate()} disabled={exportDatasetMutation.isPending}>
+            {exportDatasetMutation.isPending ? "Экспорт..." : "Скачать размеченный датасет"}
           </button>
         </div>
       </div>
@@ -207,15 +206,6 @@ export default function ProjectDetailPage() {
             <button className="btn-secondary" type="button" onClick={() => finalizeMutation.mutate()} disabled={!activeImportId || finalizeMutation.isPending}>
               {finalizeMutation.isPending ? "Finalizing..." : "Finalize import"}
             </button>
-            <select
-              className="input-field w-auto"
-              value={exportFormat}
-              onChange={(event) => setExportFormat(event.target.value as "coco" | "yolo" | "both")}
-            >
-              <option value="both">Export: COCO + YOLO</option>
-              <option value="coco">Export: COCO</option>
-              <option value="yolo">Export: YOLO</option>
-            </select>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
             Assignments for annotators are created only after you click <span className="font-semibold">Finalize import</span>. Until then, the project will not appear in their annotation workspace.
@@ -235,7 +225,7 @@ export default function ProjectDetailPage() {
               {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Errors: {lastUploadPreview.errors.join("; ")}</div> : null}
             </div>
           ) : null}
-          {archiveError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{archiveError}</div> : null}
+          {exportError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{exportError}</div> : null}
         </div>
 
         <div className="card space-y-4">
@@ -360,12 +350,6 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {exportPayload ? (
-        <div className="card">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Export preview</h2>
-          <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg bg-gray-950 p-4 text-xs text-green-200">{exportPayload}</pre>
-        </div>
-      ) : null}
     </div>
   );
 }

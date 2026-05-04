@@ -19,7 +19,7 @@ from rest_framework.routers import DefaultRouter
 
 # Импорты ViewSet'ов для роутинга
 from apps.users.views import register, login, me_view, participants_view, user_stats_view, avatar_upload_view, avatar_delete_view, BulkCreateAnnotatorsView
-from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView
+from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView, DatasetExportView
 from apps.projects.views import ProjectViewSet, TaskViewSet
 from apps.labeling.views import AnnotationViewSet
 from apps.quality.views import ReviewViewSet, MetricsViewSet
@@ -69,12 +69,13 @@ urlpatterns = [
         path("auth/register/", register, name="auth-register"),
         path("auth/login/", login, name="auth-login"),
         
-        # Датасеты (collection + detail views)
-        path("datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
-        path("datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
-        
         # Остальные эндпоинты через router
     ] + router.urls)),
+    
+    # Датасеты (отдельно, чтобы точно срабатывали)
+    path("api/datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
+    path("api/datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
+    path("api/datasets/<str:dataset_id>/export/", DatasetExportView.as_view(), name="dataset-export"),
     
     # CV Annotation эндпоинты
     path("api/", include("apps.cv_annotation.urls")),

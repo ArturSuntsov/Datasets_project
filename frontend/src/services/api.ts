@@ -162,7 +162,10 @@ function extractDetail(err: unknown): string {
 // ------------------ Auth API ------------------
 export const authAPI = {
   async login(body: LoginRequest): Promise<AuthResponse> {
-    const res = await api.post<AuthResponse>("/api/auth/login/", body, {
+    const res = await api.post<AuthResponse>("/api/auth/login/", {
+      identifier: (body as any).email || (body as any).identifier || "",
+      password: (body as any).password,
+    }, {
       headers: { "Content-Type": "application/json" },
     });
     return res.data;
@@ -228,6 +231,13 @@ export const projectsAPI = {
       max_items: maxItems,
     });
     return res.data;
+  },
+  async exportDataset(projectId: string, format: "json" | "csv" | "photo" = "json"): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/`, {
+      params: { format },
+      responseType: "blob",
+    });
+    return res.data as Blob;
   },
 };
 
@@ -351,6 +361,13 @@ export const datasetsAPI = {
   },
   async remove(id: string): Promise<void> {
     await api.delete(`/api/datasets/${id}/`);
+  },
+  async exportDataset(id: string, format: "json" | "csv" | "photo" = "json"): Promise<Blob> {
+    const res = await api.get(`/api/datasets/${id}/export/`, {
+      params: { format },
+      responseType: "blob",
+    });
+    return res.data as Blob;
   },
 };
 

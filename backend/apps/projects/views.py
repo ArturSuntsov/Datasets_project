@@ -11,6 +11,8 @@ from mongoengine import Q
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.renderers import BaseRenderer
+from rest_framework.renderers import JSONRenderer
 from rest_framework.viewsets import ViewSet
 
 from ..datasets_core.models import Dataset
@@ -21,8 +23,30 @@ from ..users.views import authenticate_from_jwt
 from .models import Project, ProjectMembership, Task
 from .serializers import ProjectSerializer, TaskSerializer
 from .services.instructions_upload import InstructionUploadError, save_project_instruction
+from .export_utils import export_project_dataset
 
 PAGE_SIZE = 20
+
+
+class _CSVRenderer(BaseRenderer):
+    media_type = "text/csv"
+    format = "csv"
+    charset = "utf-8"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        # Export endpoint returns HttpResponse directly; renderer isn't used.
+        return b""
+
+
+class _PhotoZipRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "photo"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        # Export endpoint returns HttpResponse directly; renderer isn't used.
+        return b""
 
 
 class JWTRequiredMixin:
@@ -427,6 +451,19 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
             'current_user': current_user_entry,
             'total_participants': len(leaderboard),
         })
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="export",
+        renderer_classes=[JSONRenderer, _CSVRenderer, _PhotoZipRenderer],
+    )
+    def export_dataset(self, request, pk=None, *args, **kwargs) -> Response:
+        """Export annotated dataset of the project."""
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        return export_project_dataset(pk, user, request)
 
 
 class TaskViewSet(JWTRequiredMixin, ViewSet):

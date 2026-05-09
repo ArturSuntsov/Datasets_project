@@ -25,6 +25,8 @@ from apps.labeling.views import AnnotationViewSet
 from apps.quality.views import ReviewViewSet, MetricsViewSet
 from apps.finance.views import TransactionViewSet, PaymentViewSet
 from apps.core.views import HealthCheckView, MongoDBCheckView, RedisCheckView
+from apps.quality.views_dawid_skene import project_dawid_skene_view
+from apps.quality.views_iou import check_iou_view
 
 # Создаем роутер для ViewSet'ов
 router = DefaultRouter()
@@ -46,32 +48,33 @@ router.register(r"finance/transactions", TransactionViewSet, basename="transacti
 
 urlpatterns = [
     # Django admin
-    path("admin/", admin.site.urls),
-    
-    # API эндпоинты
     path("api/", include([
-        # Health checks (проверка сервисов)
+        # Health checks
         path("health/", HealthCheckView.as_view(), name="health-check"),
         path("health/mongodb/", MongoDBCheckView.as_view(), name="health-mongodb"),
         path("health/redis/", RedisCheckView.as_view(), name="health-redis"),
 
-        # Пользователь (текущий)
+        # Пользователь
         path("users/me/", me_view, name="user-me"),
         path("users/me/stats/", user_stats_view, name="user-stats"),
         path("users/me/avatar/", avatar_upload_view, name="avatar-upload"),
         path("users/me/avatar/delete/", avatar_delete_view, name="avatar-delete"),
         path("users/participants/", participants_view, name="user-participants"),
-        
-        # ✅ МАССОВОЕ СОЗДАНИЕ АННОТАТОРОВ
         path("users/bulk-create-annotators/", BulkCreateAnnotatorsView.as_view(), name="bulk-create-annotators"),
 
-        # Авторизация (function-based views)
+        # Авторизация
         path("auth/register/", register, name="auth-register"),
         path("auth/login/", login, name="auth-login"),
         
-        # Датасеты (collection + detail views)
+        # Датасеты
         path("datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
         path("datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
+        
+        # ✅ Dawid-Skene (исправлено)
+        path("quality/project/<str:project_id>/dawid-skene/", project_dawid_skene_view, name="project-dawid-skene"),
+
+        # IoU Check (быстрая проверка)
+        path("quality/check-iou/", check_iou_view, name="quality-check-iou"),
         
         # Остальные эндпоинты через router
     ] + router.urls)),

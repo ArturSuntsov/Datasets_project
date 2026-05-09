@@ -374,17 +374,40 @@ export const tasksAPI = {
   },
 };
 
-// ------------------ Quality API ------------------
+// ------------------ Quality API (обновлено) ------------------
 export const qualityAPI = {
-  async createReview(body: QualityReviewRequest): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/quality/review/", body);
+  async createReview(body: QualityReviewRequest): Promise<QualityReviewResponse> {
+    const res = await api.post<QualityReviewResponse>("/api/quality/review/", body);
     return res.data;
   },
-  async metrics(datasetId: string, params?: { limit?: number; offset?: number }): Promise<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }> {
-    const res = await api.get<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }>(
-      `/api/quality/metrics/${datasetId}/`,
-      { params }
-    );
+
+  async metrics(datasetId: string, params?: { limit?: number; offset?: number }): Promise<{
+    dataset_id: string;
+    items: QualityMetricsItem[];
+    limit?: number;
+    offset?: number;
+    total?: number;
+  }> {
+    const res = await api.get<{
+      dataset_id: string;
+      items: QualityMetricsItem[];
+      limit?: number;
+      offset?: number;
+      total?: number;
+    }>(`/api/quality/metrics/${datasetId}/`, { params });
+    return res.data;
+  },
+};
+
+// ------------------ Rating History API ------------------
+export const ratingAPI = {
+  async history(params?: { limit?: number; offset?: number }): Promise<ApiListResponse<RatingHistoryItem>> {
+    const res = await api.get<ApiListResponse<RatingHistoryItem>>("/api/rating/history/", { params });
+    return res.data;
+  },
+
+  async annotatorHistory(userId: string, params?: { limit?: number; offset?: number }): Promise<ApiListResponse<RatingHistoryItem>> {
+    const res = await api.get<ApiListResponse<RatingHistoryItem>>(`/api/rating/history/${userId}/`, { params });
     return res.data;
   },
 };
@@ -480,6 +503,32 @@ export const statsAPI = {
 //     return res.data;
 //   },
 // };
+
+// ------------------ Dawid-Skene Quality API ------------------
+export const dawidSkeneAPI = {
+  async getProjectQuality(projectId: string): Promise<{
+    project_id: string;
+    annotators: Array<{
+      user_id: string;
+      username: string;
+      accuracy: number;
+      f1: number;
+      error_rate: number;
+      confusion_matrix: Record<string, Record<string, number>>;
+      rating: number;
+      rating_history: Array<{
+        rating_before: number;
+        rating_after: number;
+        rating_delta: number;
+        task_id: string;
+        created_at: string;
+      }>;
+    }>;
+  }> {
+    const res = await api.get(`/api/quality/project/${projectId}/dawid-skene/`);
+    return res.data;
+  },
+};
 
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));

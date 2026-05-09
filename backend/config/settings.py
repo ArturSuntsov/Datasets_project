@@ -268,3 +268,8 @@ try:
 except Exception as e:
     logger.error(f"✗ Ошибка подключения к MongoDB: {e}")
     raise
+
+# =============================================================================
+# ANNOTATOR RATING (Dawid-Skene + EWMA)
+# =============================================================================
+ANNOTATOR_RATING_ALPHA = float(os.getenv("ANNOTATOR_RATING_ALPHA", "0.1"))  # скорость обновления рейтинга

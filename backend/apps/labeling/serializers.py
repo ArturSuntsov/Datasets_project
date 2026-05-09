@@ -9,6 +9,7 @@ from ..datasets_core.models import Dataset
 from ..projects.models import Task
 from ..users.models import User
 from .models import Annotation, LabelingSession
+from ..users.views import authenticate_from_jwt
 
 
 class AnnotationSerializer(serializers.Serializer):
@@ -135,20 +136,31 @@ class AnnotationSerializer(serializers.Serializer):
 
     def create(self, validated_data: Dict[str, Any]) -> Annotation:
         request = self.context.get("request")
-        user = getattr(request, "user", None)
+        try:
+            user = authenticate_from_jwt(request)
+        except PermissionError:
+            raise serializers.ValidationError("Authentication required.")
         if not user:
             raise serializers.ValidationError("Authentication required.")
 
         task: Task = validated_data.pop("_task")
         dataset: Dataset = validated_data.pop("_dataset")
         annotation_format = validated_data.get("annotation_format") or self._expected_format(dataset)
-
         session_id = validated_data.pop("session_id", None)
+
         session: Optional[LabelingSession] = None
         if session_id:
             session = LabelingSession.objects(id=session_id, annotator=user, task=task).first()
             if not session:
                 raise serializers.ValidationError("session_id не найден или не принадлежит вам.")
+
+        # Убираем annotation_format из validated_data, чтобы не передавать дважды
+        validated_data.pop("annotation_format", None)
+        validated_data.pop("_expected_format", None)
+        validated_data.pop("task_id", None)
+        validated_data.pop("dataset_id", None)
+        validated_data.pop("_task", None)
+        validated_data.pop("_dataset", None)
 
         annotation = Annotation(
             annotator=user,

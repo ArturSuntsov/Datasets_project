@@ -2,9 +2,149 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { projectsAPI, workflowAPI } from "../services/api";
+import { projectsAPI, workflowAPI, dawidSkeneAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
+
+function DawidSkeneQuality({ projectId }: { projectId: string }) {
+  const qualityQuery = useQuery({
+    queryKey: ["dawid-skene-quality", projectId],
+    queryFn: () => dawidSkeneAPI.getProjectQuality(projectId),
+    enabled: !!projectId,
+  });
+
+  if (qualityQuery.isLoading) return <LoadingSpinner />;
+  if (qualityQuery.isError || !qualityQuery.data) {
+    return (
+      <div className="card">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+          Annotator quality (Dawid-Skene)
+        </h2>
+        <p className="mt-2 text-sm text-gray-500">
+          Quality metrics will appear after cross-check reviews are created.
+        </p>
+      </div>
+    );
+  }
+
+  const { annotators } = qualityQuery.data;
+
+  return (
+    <div className="card">
+      <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+        Annotator quality (Dawid-Skene)
+      </h2>
+      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        EM-based probabilistic model. Accuracy and confusion matrix computed
+        from cross-check consensus.
+      </p>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {annotators.map((a) => (
+          <div
+            key={a.user_id}
+            className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950"
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-gray-900 dark:text-white">
+                {a.username}
+              </div>
+              <div
+                className={`text-sm font-bold ${
+                  a.accuracy >= 0.7
+                    ? "text-green-600"
+                    : a.accuracy >= 0.5
+                    ? "text-yellow-600"
+                    : "text-red-600"
+                }`}
+              >
+                Acc: {(a.accuracy * 100).toFixed(0)}%
+              </div>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+              <div className="rounded bg-white p-2 dark:bg-gray-900">
+                <div className="text-gray-500">F1-score</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {a.f1?.toFixed(3) ?? "—"}
+                </div>
+              </div>
+              <div className="rounded bg-white p-2 dark:bg-gray-900">
+                <div className="text-gray-500">Error rate</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {(a.error_rate * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div className="rounded bg-white p-2 dark:bg-gray-900">
+                <div className="text-gray-500">Rating</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {a.rating?.toFixed(2) ?? "—"}
+                </div>
+              </div>
+            </div>
+
+            {a.confusion_matrix && Object.keys(a.confusion_matrix).length > 0 ? (
+              <div className="mt-3">
+                <div className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Confusion matrix (true → predicted):
+                </div>
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr>
+                      <th className="text-left text-gray-500">True ↓ Pred →</th>
+                      {Object.keys(Object.values(a.confusion_matrix)[0] || {}).map((label) => (
+                        <th key={label} className="text-center text-gray-500">
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(a.confusion_matrix).map(([trueLabel, row]) => (
+                      <tr key={trueLabel}>
+                        <td className="font-medium text-gray-700 dark:text-gray-300">
+                          {trueLabel}
+                        </td>
+                        {Object.entries(row).map(([predLabel, prob]) => (
+                          <td
+                            key={predLabel}
+                            className={`text-center font-mono ${
+                              trueLabel === predLabel
+                                ? Number(prob) >= 0.7
+                                  ? "text-green-600"
+                                  : "text-yellow-600"
+                                : Number(prob) > 0.3
+                                ? "text-red-600"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            {((prob as number) * 100).toFixed(0)}%
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {a.rating_history && a.rating_history.length > 0 ? (
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Last {a.rating_history.length} tasks:{" "}
+                {a.rating_history.slice(0, 3).map((h, i) => (
+                  <span key={i} className="ml-1">
+                    {h.rating_delta >= 0 ? "↑" : "↓"}
+                    {Math.abs(h.rating_delta).toFixed(2)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -539,6 +679,8 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       </div>
+
+      <DawidSkeneQuality projectId={projectId!} />
 
       <div className="card">
         <div className="flex items-center justify-between">

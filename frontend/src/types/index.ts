@@ -678,23 +678,62 @@ export interface AnnotateRequest {
   input_context?: Record<string, unknown>;
 }
 
-// ------------------ Quality ------------------
+// ------------------ Quality (обновлено) ------------------
 export interface QualityReviewRequest {
   task_id: string;
-  annotation_a_id: string;
-  annotation_b_id: string;
+  annotation_ids?: string[];              // новый формат: массив ID аннотаций
+  annotation_a_id?: string;               // обратная совместимость
+  annotation_b_id?: string;               // обратная совместимость
   arbitrator?: string | null;
   arbitration_requested?: boolean;
   arbitration_comment?: string | null;
 }
 
+export interface AnnotatorQualityItem {
+  accuracy: number;
+  f1: number;
+  confusion_matrix: Record<string, Record<string, number>>;
+  error_rate: number;
+}
+
+export interface QualityReviewResponse {
+  id: string;
+  task_id: string;
+  dataset_id: string;
+  review_status: string;
+  metrics: Record<string, unknown>;
+  final_label_data: Record<string, unknown> | null;
+  annotator_quality: Record<string, AnnotatorQualityItem>;
+  em_iterations: number;
+  convergence_achieved: boolean;
+}
+
 export interface QualityMetricsItem {
   task_id: string;
+  annotator_id?: string;
   precision: number;
   recall: number;
   f1: number;
+  confusion_matrix?: Record<string, Record<string, number>>;
   details?: Record<string, unknown>;
   created_at?: string;
+}
+
+// ------------------ Rating History ------------------
+export interface RatingHistoryItem {
+  id: string;
+  user_id: string;
+  task_id: string;
+  f1_score: number;
+  difficulty: number;
+  accuracy: number;
+  task_score: number;
+  rating_delta: number;
+  rating_before: number;
+  rating_after: number;
+  iteration_count: number;
+  annotation_format: string;
+  created_at: string;
 }
 
 // ------------------ Finance ------------------

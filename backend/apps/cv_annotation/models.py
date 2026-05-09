@@ -96,6 +96,8 @@ class VideoInterval(Document):
     STATUS_DRAFT = "draft"
     STATUS_APPROVED = "approved"
     STATUS_REJECTED = "rejected"
+    STATUS_DISPUTED = "disputed"
+    STATUS_INSUFFICIENT_VALIDATORS = "insufficient_validators"
 
     SOURCE_AUTO = "auto"
     SOURCE_MANUAL = "manual"
@@ -106,7 +108,11 @@ class VideoInterval(Document):
     end_frame = IntField(required=True, min_value=0)
     start_sec = FloatField(default=0.0)
     end_sec = FloatField(default=0.0)
-    status = StringField(required=True, default=STATUS_DRAFT, choices=[STATUS_DRAFT, STATUS_APPROVED, STATUS_REJECTED])
+    status = StringField(
+        required=True,
+        default=STATUS_DRAFT,
+        choices=[STATUS_DRAFT, STATUS_APPROVED, STATUS_REJECTED, STATUS_DISPUTED, STATUS_INSUFFICIENT_VALIDATORS],
+    )
     source = StringField(required=True, default=SOURCE_AUTO, choices=[SOURCE_AUTO, SOURCE_MANUAL])
     confidence = FloatField(default=0.0)
     metadata = DictField(default=dict)
@@ -257,6 +263,9 @@ class WorkItem(Document):
     VALIDATION_PENDING = "pending"
     VALIDATION_APPROVED = "approved"
     VALIDATION_NEEDS_CHANGES = "needs_changes"
+    VALIDATION_DISPUTED = "disputed"
+    VALIDATION_INSUFFICIENT_ANNOTATORS = "insufficient_annotators"
+    VALIDATION_INSUFFICIENT_VALIDATORS = "insufficient_validators"
 
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
@@ -273,7 +282,14 @@ class WorkItem(Document):
     video_qc = DictField(default=dict)
     validation_status = StringField(
         default=VALIDATION_PENDING,
-        choices=[VALIDATION_PENDING, VALIDATION_APPROVED, VALIDATION_NEEDS_CHANGES],
+        choices=[
+            VALIDATION_PENDING,
+            VALIDATION_APPROVED,
+            VALIDATION_NEEDS_CHANGES,
+            VALIDATION_DISPUTED,
+            VALIDATION_INSUFFICIENT_ANNOTATORS,
+            VALIDATION_INSUFFICIENT_VALIDATORS,
+        ],
     )
     validation_comment = StringField(default="")
     validated_by = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
@@ -387,7 +403,14 @@ class GoldenFrame(Document):
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     frame = ReferenceField(FrameItem, required=True, reverse_delete_rule=CASCADE)
     reference_annotation = DictField(required=True, default=dict)
+    source_work_item = ReferenceField("WorkItem", null=True, reverse_delete_rule=CASCADE)
+    candidate_score = FloatField(default=0.0)
+    candidate_source = StringField(default="")
+    is_candidate = BooleanField(default=False)
     is_active = BooleanField(default=True)
+    promoted_by = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)
+    promoted_at = DateTimeField(null=True)
+    review_notes = StringField(default="")
     created_at = DateTimeField(default=datetime.utcnow)
     updated_at = DateTimeField(default=datetime.utcnow)
 
@@ -407,6 +430,10 @@ class SecurityEvent(Document):
     EVENT_REVIEW_RESOLVE = "review_resolve"
     EVENT_VIDEO_QC = "video_qc"
     EVENT_ASSIGNMENT_DISTRIBUTION = "assignment_distribution"
+    EVENT_GOLDEN_CANDIDATE = "golden_candidate"
+    EVENT_GOLDEN_PROMOTED = "golden_promoted"
+    EVENT_ASSIGNMENT_RECOVERED = "assignment_recovered"
+    EVENT_EXPORT_GENERATED = "export_generated"
 
     project = ReferenceField(Project, required=True, reverse_delete_rule=CASCADE)
     actor = ReferenceField(User, null=True, reverse_delete_rule=CASCADE)

@@ -57,6 +57,12 @@ class AssignmentSubmitSerializer(serializers.Serializer):
                     raise serializers.ValidationError(f"label_data.boxes[{index}] must be inside frame bounds")
                 if x + width > frame.width or y + height > frame.height:
                     raise serializers.ValidationError(f"label_data.boxes[{index}] exceeds frame bounds")
+                frame_area = max(float(frame.width or 0) * float(frame.height or 0), 1.0)
+                box_area = width * height
+                if box_area < 4.0:
+                    raise serializers.ValidationError(f"label_data.boxes[{index}] is too small to be useful")
+                if box_area / frame_area > 0.98:
+                    raise serializers.ValidationError(f"label_data.boxes[{index}] covers almost the entire frame")
             if allowed_labels and label not in allowed_labels:
                 raise serializers.ValidationError(f"label_data.boxes[{index}] uses unknown label '{label}'")
         return value

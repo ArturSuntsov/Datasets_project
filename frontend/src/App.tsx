@@ -18,6 +18,7 @@ import ProjectDetailPage from "./pages/ProjectDetailPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectWorkflowPage from "./pages/ProjectWorkflowPage";
 import VideoIntervalsPage from "./pages/VideoIntervalsPage";
+import BBoxValidationPage from "./pages/BBoxValidationPage";
 
 import AnnotationPage from "./pages/AnnotationPage";
 import AnnotatorProjectPage from "./pages/AnnotatorProjectPage";
@@ -83,6 +84,16 @@ export default function App() {
           <RequireAuth>
             <Layout>
               <VideoIntervalsPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/labeling/bbox-validation"
+        element={
+          <RequireAuth>
+            <Layout>
+              <BBoxValidationPage />
             </Layout>
           </RequireAuth>
         }
@@ -198,4 +209,3 @@ export default function App() {
     </Routes>
   );
 }
-

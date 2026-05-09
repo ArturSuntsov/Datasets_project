@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 import { projectsAPI, workflowAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const [uploadQueue, setUploadQueue] = useState<File[]>([]);
@@ -18,6 +20,7 @@ export default function ProjectDetailPage() {
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "voc" | "csv" | "both">("both");
   const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
@@ -33,6 +36,11 @@ export default function ProjectDetailPage() {
   const securityEventsQuery = useQuery({
     queryKey: ["project-security-events", projectId],
     queryFn: () => workflowAPI.securityEvents(projectId!),
+    enabled: !!projectId,
+  });
+  const goldenCandidatesQuery = useQuery({
+    queryKey: ["project-golden-candidates", projectId],
+    queryFn: () => workflowAPI.goldenCandidates(projectId!),
     enabled: !!projectId,
   });
 
@@ -102,6 +110,45 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const syncWorkflowMutation = useMutation({
+    mutationFn: async () => workflowAPI.sync(projectId!),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["project-golden-candidates", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["project-security-events", projectId] });
+    },
+  });
+
+  const deleteProjectMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("Project id missing");
+      await projectsAPI.delete(projectId);
+    },
+    onSuccess: async () => {
+      setDeleteError(null);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      navigate("/projects");
+    },
+    onError: async (err: any) => {
+      if (isAxiosError(err) && err.response?.status === 404) {
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
+        navigate("/projects");
+        return;
+      }
+      setDeleteError(err?.response?.data?.detail || err?.message || "Failed to delete project");
+    },
+  });
+
+  const promoteGoldenMutation = useMutation({
+    mutationFn: async ({ goldenFrameId, reviewNotes }: { goldenFrameId: string; reviewNotes?: string }) =>
+      workflowAPI.promoteGoldenCandidate(projectId!, goldenFrameId, reviewNotes),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["project-golden-candidates", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["project-security-events", projectId] });
+    },
+  });
+
   const instructionUploadMutation = useMutation({
     mutationFn: async () => {
       if (!projectId || !instructionFile) {
@@ -123,19 +170,68 @@ export default function ProjectDetailPage() {
   const lastUploadPreview = uploadMutation.data?.preview;
   const readyImportId = activeImportId || String(overview?.imports?.latest_ready_import_id || "");
   const hasVideoAssets = Array.isArray(overview?.imports?.video_asset_ids) && overview.imports.video_asset_ids.length > 0;
+  const totalWorkItems = Number(overview?.work_items?.total || 0);
+  const completedWorkItems = Number(overview?.work_items?.completed || 0);
+  const approvedExportItems = Number((overview?.work_items as any)?.validation_approved || 0);
+  const validationPendingItems = Number((overview?.work_items as any)?.validation_pending || 0);
+  const validationDisputedItems = Number((overview?.work_items as any)?.validation_disputed || 0);
+  const insufficientAnnotatorItems = Number((overview?.work_items as any)?.insufficient_annotators || 0);
+  const insufficientValidatorItems = Number((overview?.work_items as any)?.insufficient_validators || 0);
+  const exportBlockedItems = Math.max(0, totalWorkItems - approvedExportItems);
+  const exportReadyPercent = totalWorkItems > 0 ? Math.round((approvedExportItems / totalWorkItems) * 100) : 0;
+  const exportReady = approvedExportItems > 0;
+  const goldenCandidates = goldenCandidatesQuery.data?.items ?? [];
+  const goldenActiveCount = Number(goldenCandidatesQuery.data?.active_count ?? 0);
+  const goldenCandidateCount = Number(goldenCandidatesQuery.data?.candidate_count ?? 0);
+  const overviewAny = overview as any;
+  const bboxValidationAssigned = Number(overviewAny?.bbox_validation?.assigned || 0);
+  const canDeleteProject = user?.role === "admin" || (user?.role === "customer" && projectQuery.data?.owner_id === user.id);
+  const readinessGates = [
+    { label: "Импорт готов", ready: Number(overview?.imports?.ready || 0) > 0 || Number(overview?.imports?.finalized || 0) > 0 },
+    { label: "Интервалы размечаются", ready: Number(overviewAny?.intervals?.total || 0) > 0 || Number(overviewAny?.intervals?.validation_assigned || 0) > 0 },
+    { label: "Интервалы валидируются", ready: Number(overviewAny?.intervals?.validation_assigned || 0) > 0 || Number(overviewAny?.intervals?.approved || 0) > 0 },
+    { label: "BBox-разметка доступна", ready: Number(overview?.work_items?.total || 0) > 0 },
+    { label: "BBox-валидация идет", ready: Number(overviewAny?.bbox_validation?.assigned || 0) > 0 || Number((overview?.work_items as any)?.validation_pending || 0) > 0 },
+    { label: "Экспорт доступен", ready: exportReady },
+  ];
 
   const completion = useMemo(() => {
-    const total = Number(overview?.work_items?.total || 0);
-    const done = Number(overview?.work_items?.completed || 0);
-    return total > 0 ? Math.round((done / total) * 100) : 0;
-  }, [overview]);
+    return totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
+  }, [completedWorkItems, totalWorkItems]);
 
   if (projectQuery.isLoading) {
     return <LoadingSpinner size="lg" />;
   }
 
   if (!projectQuery.data) {
-    return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">Project not found.</div>;
+    const canTryDeleteMissingProject = user?.role === "customer" || user?.role === "admin";
+    return (
+      <div className="space-y-4">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+          Project not found.
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Link to="/projects" className="btn-secondary">
+            Back to projects
+          </Link>
+          {canTryDeleteMissingProject && projectId ? (
+            <button
+              type="button"
+              className="btn-secondary border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+              disabled={deleteProjectMutation.isPending}
+              onClick={() => {
+                if (window.confirm("Remove this unavailable project from your workspace?")) {
+                  deleteProjectMutation.mutate();
+                }
+              }}
+            >
+              {deleteProjectMutation.isPending ? "Deleting..." : "Delete project"}
+            </button>
+          ) : null}
+        </div>
+        {deleteError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{deleteError}</div> : null}
+      </div>
+    );
   }
 
   return (
@@ -159,31 +255,155 @@ export default function ProjectDetailPage() {
             Этап 4: Валидация bbox
           </Link>
           <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-            {exportMutation.isPending ? "Exporting..." : "Export dataset"}
+            {exportMutation.isPending ? "Exporting..." : exportReady ? "Export dataset" : "Export report"}
           </button>
           <button className="btn-secondary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
-            {exportArchiveMutation.isPending ? "Preparing zip..." : "Download zip"}
+            {exportArchiveMutation.isPending ? "Preparing zip..." : exportReady ? "Download zip" : "Download report zip"}
           </button>
+          <button className="btn-secondary" onClick={() => syncWorkflowMutation.mutate()} disabled={syncWorkflowMutation.isPending}>
+            {syncWorkflowMutation.isPending ? "Syncing..." : "Sync workflow"}
+          </button>
+          {canDeleteProject ? (
+            <button
+              className="btn-secondary border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+              onClick={() => {
+                if (window.confirm("Удалить проект и все связанные задания/разметки? Это действие нельзя отменить.")) {
+                  deleteProjectMutation.mutate();
+                }
+              }}
+              disabled={deleteProjectMutation.isPending}
+            >
+              {deleteProjectMutation.isPending ? "Deleting..." : "Delete project"}
+            </button>
+          ) : null}
         </div>
       </div>
+      {deleteError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{deleteError}</div> : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Frames</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.imports?.frames_total ?? 0}</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{Number(overview?.imports?.frames_total ?? 0)}</div>
         </div>
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Work items</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.work_items?.total ?? 0}</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{totalWorkItems}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Export ready</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{approvedExportItems}/{totalWorkItems}</div>
+          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{exportReadyPercent}% validated</div>
         </div>
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Low-agreement requeue</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{overview?.assignments?.disputed ?? 0}</div>
+          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{Number(overview?.assignments?.disputed ?? 0)}</div>
         </div>
         <div className="card">
           <div className="text-sm text-gray-500 dark:text-gray-400">Completion</div>
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{completion}%</div>
         </div>
+      </div>
+
+      <div className={`rounded-lg border p-4 ${exportReadyPercent >= 80 ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">Dataset export readiness</div>
+            <div className="mt-1 text-xs">
+              Export includes only approved bbox validation items. Annotation completion is {completion}%, but validated export readiness is {exportReadyPercent}%.
+            </div>
+          </div>
+          <div className="text-right text-sm">
+            <div className="font-semibold">{approvedExportItems} included / {exportBlockedItems} excluded</div>
+            <div className="text-xs opacity-80">pending {validationPendingItems}, disputed {validationDisputedItems}, insufficient {insufficientAnnotatorItems + insufficientValidatorItems}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Готовность workflow</h2>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Выгрузка включает только кадры с завершенной bbox-разметкой и подтвержденной bbox-валидацией.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {readinessGates.map((gate) => (
+            <div key={gate.label} className={`rounded-lg border p-3 text-sm ${gate.ready ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400"}`}>
+              <div className="font-medium">{gate.label}</div>
+              <div className="mt-1 text-xs">{gate.ready ? "Готово" : "Ожидает"}</div>
+            </div>
+          ))}
+        </div>
+        {!exportReady ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+            Экспорт станет доступен после появления хотя бы одного `validation_approved` кадра.
+            <div className="mt-2">
+              Сейчас: ожидает bbox-валидации {validationPendingItems}, назначено пакетов валидации {bboxValidationAssigned}, спорных {validationDisputedItems}, нехватка исполнителей {insufficientAnnotatorItems}, нехватка валидаторов {insufficientValidatorItems}.
+            </div>
+            <div className="mt-2">
+              Если это старый проект, нажмите Sync workflow: система попробует пересобрать очередь валидации по уже готовой разметке.
+            </div>
+          </div>
+        ) : null}
+        {syncWorkflowMutation.data?.sync ? (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
+            Sync complete: bbox assignments created {syncWorkflowMutation.data.sync.bbox_annotation_created}, interval assignments created {syncWorkflowMutation.data.sync.interval_annotation_created}, evaluated {syncWorkflowMutation.data.sync.evaluated_items}, bbox validation batches created {syncWorkflowMutation.data.sync.bbox_validation_created}.
+          </div>
+        ) : null}
+      </div>
+
+      <div className="card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Golden pool</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              Hidden candidate set for quality control. Only customer and admin can promote items into the active golden pool.
+            </p>
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            Active: {goldenActiveCount} · Candidates: {goldenCandidateCount}
+          </div>
+        </div>
+        {goldenCandidatesQuery.isLoading ? (
+          <LoadingSpinner size="sm" />
+        ) : goldenCandidates.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {goldenCandidates.slice(0, 6).map((candidate) => (
+              <div key={candidate.golden_frame_id} className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-800 dark:bg-gray-950">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900 dark:text-white">Frame {candidate.frame_number}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      score {Number(candidate.candidate_score || 0).toFixed(3)} · {candidate.candidate_source || "manual"}
+                    </div>
+                  </div>
+                  <a href={candidate.frame_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+                    Open
+                  </a>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={promoteGoldenMutation.isPending || candidate.is_active}
+                    onClick={() => {
+                      const notes = window.prompt("Review notes for promotion", candidate.review_notes || "");
+                      if (notes === null) return;
+                      promoteGoldenMutation.mutate({ goldenFrameId: candidate.golden_frame_id, reviewNotes: notes });
+                    }}
+                  >
+                    {candidate.is_active ? "Active" : "Promote"}
+                  </button>
+                  {candidate.is_active ? <span className="text-xs text-emerald-700 dark:text-emerald-300">Already active</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700">
+            No golden candidates yet.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">

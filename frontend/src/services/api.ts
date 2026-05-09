@@ -12,6 +12,8 @@ import {
   AuthResponse,
   CreateProjectRequest,
   Dataset,
+  GoldenCandidatesResponse,
+  GoldenCandidate,
   LoginRequest,
   Participant,
   PaymentRequestBody,
@@ -21,6 +23,8 @@ import {
   ProjectImportResponse,
   ProjectOverview,
   QualityMetricsItem,
+  LeaderboardResponse,
+  LeaderboardEntry,
   QualityReviewRequest,
   QueueItem,
   RegisterRequest,
@@ -249,12 +253,16 @@ export const workflowAPI = {
     const res = await api.get<ProjectOverview>(`/api/projects/${projectId}/overview/`);
     return res.data;
   },
+  async sync(projectId: string): Promise<ProjectOverview> {
+    const res = await api.post<ProjectOverview>(`/api/projects/${projectId}/workflow/sync/`, {});
+    return res.data;
+  },
   async export(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<ProjectExportPayload> {
-    const res = await api.get<ProjectExportPayload>(`/api/projects/${projectId}/export/`, { params: { format } });
+    const res = await api.get<ProjectExportPayload>(`/api/cv/projects/${projectId}/export/`, { params: { format } });
     return res.data;
   },
   async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<Blob> {
-    const res = await api.get(`/api/projects/${projectId}/export/`, {
+    const res = await api.get(`/api/cv/projects/${projectId}/export/`, {
       params: { format, download: "1" },
       responseType: "blob",
     });
@@ -262,6 +270,16 @@ export const workflowAPI = {
   },
   async securityEvents(projectId: string): Promise<ApiListResponse<SecurityEventItem>> {
     const res = await api.get<ApiListResponse<SecurityEventItem>>(`/api/projects/${projectId}/security-events/`);
+    return res.data;
+  },
+  async goldenCandidates(projectId: string): Promise<GoldenCandidatesResponse> {
+    const res = await api.get<GoldenCandidatesResponse>(`/api/projects/${projectId}/golden-candidates/`);
+    return res.data;
+  },
+  async promoteGoldenCandidate(projectId: string, goldenFrameId: string, reviewNotes?: string): Promise<any> {
+    const res = await api.post(`/api/projects/${projectId}/golden-candidates/${goldenFrameId}/promote/`, {
+      review_notes: reviewNotes || "",
+    });
     return res.data;
   },
   async listVideoIntervals(projectId: string, params?: { asset_id?: string; status?: string }): Promise<ApiListResponse<VideoInterval>> {
@@ -516,12 +534,12 @@ export const statsAPI = {
 };
 
 // ------------------ Leaderboard API ------------------
-// export const leaderboardAPI = {
-//   async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
-//     const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
-//     return res.data;
-//   },
-// };
+export const leaderboardAPI = {
+  async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
+    const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
+    return res.data;
+  },
+};
 
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));

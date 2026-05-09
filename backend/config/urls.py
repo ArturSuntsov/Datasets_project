@@ -25,6 +25,7 @@ from apps.labeling.views import AnnotationViewSet
 from apps.quality.views import ReviewViewSet, MetricsViewSet
 from apps.finance.views import TransactionViewSet, PaymentViewSet
 from apps.core.views import HealthCheckView, MongoDBCheckView, RedisCheckView
+from apps.cv_annotation.views import ProjectExportView, project_export_endpoint
 
 # Создаем роутер для ViewSet'ов
 router = DefaultRouter()
@@ -47,6 +48,8 @@ router.register(r"finance/transactions", TransactionViewSet, basename="transacti
 urlpatterns = [
     # Django admin
     path("admin/", admin.site.urls),
+    path("api/cv/projects/<str:project_id>/export/", project_export_endpoint, name="cv-project-export-direct"),
+    path("api/projects/<str:project_id>/export/", project_export_endpoint, name="project-export-direct"),
     
     # API эндпоинты
     path("api/", include([
@@ -72,6 +75,8 @@ urlpatterns = [
         # Датасеты (collection + detail views)
         path("datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
         path("datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
+        path("cv/projects/<str:project_id>/export/", project_export_endpoint, name="cv-project-export"),
+        path("projects/<str:project_id>/export/", project_export_endpoint, name="project-export"),
         
         # Остальные эндпоинты через router
     ] + router.urls)),

@@ -138,7 +138,7 @@ export default function AnnotatorProjectPage() {
               {nextAssignmentMutation.isPending ? "Открываем..." : primaryActionLabel}
             </button>
           </div>
-          <Link to={`/labeling/intervals?projectId=${project.project_id}&stage=bbox-validation`} className="rounded-lg border border-gray-200 p-4 transition hover:border-blue-300 dark:border-gray-800 dark:hover:border-blue-700">
+          <Link to={`/labeling/bbox-validation?projectId=${project.project_id}`} className="rounded-lg border border-gray-200 p-4 transition hover:border-blue-300 dark:border-gray-800 dark:hover:border-blue-700">
             <div className="text-sm text-gray-500 dark:text-gray-400">Этап 4</div>
             <div className="mt-2 text-lg font-semibold text-gray-900 dark:text-white">BBox-валидация</div>
             <div className="mt-3 text-3xl font-bold text-gray-900 dark:text-white">{bboxValidationCount}</div>

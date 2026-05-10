@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AnnotationCanvas from "../components/AnnotationCanvas";
@@ -21,6 +21,11 @@ export default function AnnotationPage() {
   const [selectedLabel, setSelectedLabel] = useState("");
   const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false); // unsaved changes indicator
+
+  // Undo/Redo external triggers
+  const canvasUndoRef = useRef<() => void>(() => {});
+  const canvasRedoRef = useRef<() => void>(() => {});
 
   const assignmentQuery = useQuery({
     queryKey: ["annotator-assignment", assignmentId],
@@ -37,12 +42,12 @@ export default function AnnotationPage() {
   useEffect(() => {
     if (!assignmentQuery.data) return;
     const draftBoxes = assignmentQuery.data.draft?.boxes ?? [];
-    const preAnnotatedBoxes = assignmentQuery.data.pre_annotations?.boxes ?? [];
-    const initialBoxes = draftBoxes.length > 0 ? draftBoxes : preAnnotatedBoxes;
+    const initialBoxes = draftBoxes;
     setBoxes(initialBoxes);
     setComment(assignmentQuery.data.comment ?? "");
     setSelectedLabel((assignmentQuery.data.label_schema?.[0]?.name as string | undefined) ?? "");
     setSelectedBoxIndex(initialBoxes.length > 0 ? 0 : null);
+    setIsDirty(false);
   }, [assignmentQuery.data]);
 
   const labels = useMemo(() => assignmentQuery.data?.label_schema ?? [], [assignmentQuery.data]);
@@ -52,6 +57,7 @@ export default function AnnotationPage() {
   const submitMutation = useMutation({
     mutationFn: (isFinal: boolean) => annotatorAPI.submit(assignmentId!, { label_data: { boxes }, comment, is_final: isFinal }),
     onSuccess: async (result) => {
+      setIsDirty(false);
       await queryClient.invalidateQueries({ queryKey: ["annotator-queue"] });
       await queryClient.invalidateQueries({ queryKey: ["annotator-projects"] });
       await queryClient.invalidateQueries({ queryKey: ["annotator-project-detail", assignmentQuery.data?.project_id] });
@@ -69,8 +75,71 @@ export default function AnnotationPage() {
     },
   });
 
+  // ============================================================
+  // ⌨️ HOTKEYS — save, submit, navigate
+  // ============================================================
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      // Ctrl+S — save draft
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        submit(false);
+        return;
+      }
+
+      // Enter — final submit
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        submit(true);
+        return;
+      }
+
+      // Arrow keys — navigate batch
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        // This is handled by the batch item links — we just let the user click
+        // But we can also trigger programmatic navigation if needed
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [boxes, comment, selectedLabel]);
+
+  // ============================================================
+  // Listen for custom events from AnnotationCanvas
+  // ============================================================
+  useEffect(() => {
+    const onSelectLabel = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && labels.some((l) => l.name === detail)) {
+        setSelectedLabel(detail);
+      }
+    };
+    window.addEventListener("annotation:select-label", onSelectLabel);
+    return () => window.removeEventListener("annotation:select-label", onSelectLabel);
+  }, [labels]);
+
+  // ============================================================
+  // AUTO-SAVE (every 30 seconds)
+  // ============================================================
+  const autoSaveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    autoSaveRef.current = setInterval(() => {
+      submitMutation.mutate(false);
+    }, 30000);
+    return () => {
+      if (autoSaveRef.current) clearInterval(autoSaveRef.current);
+    };
+  }, [isDirty, boxes, comment]);
+
   const updateBox = (index: number, patch: Partial<BoundingBox>) => {
     setBoxes((current) => current.map((box, boxIndex) => (boxIndex === index ? { ...box, ...patch } : box)));
+    setIsDirty(true);
   };
 
   const removeSelectedBox = () => {
@@ -81,30 +150,23 @@ export default function AnnotationPage() {
       if (boxes.length <= 1) return null;
       return Math.max(0, current - 1);
     });
+    setIsDirty(true);
   };
 
   const validateBeforeSubmit = (): string | null => {
-    if (!assignmentQuery.data) {
-      return "Задание не загружено";
-    }
+    if (!assignmentQuery.data) return "Задание не загружено";
     const frameWidth = assignmentQuery.data.frame.width;
     const frameHeight = assignmentQuery.data.frame.height;
-    if (boxes.length === 0) {
-      return "Добавьте хотя бы одну рамку.";
-    }
+    if (boxes.length === 0) return "Добавьте хотя бы одну рамку.";
     for (const [index, box] of boxes.entries()) {
       if (!Number.isFinite(box.x) || !Number.isFinite(box.y) || !Number.isFinite(box.width) || !Number.isFinite(box.height)) {
         return `Рамка #${index + 1}: координаты должны быть числами.`;
       }
-      if (box.width <= 0 || box.height <= 0) {
-        return `Рамка #${index + 1}: ширина и высота должны быть больше нуля.`;
-      }
+      if (box.width <= 0 || box.height <= 0) return `Рамка #${index + 1}: ширина и высота должны быть больше нуля.`;
       if (box.x < 0 || box.y < 0 || box.x + box.width > frameWidth || box.y + box.height > frameHeight) {
         return `Рамка #${index + 1}: выходит за границы изображения.`;
       }
-      if (!allowedLabels.has(box.label)) {
-        return `Рамка #${index + 1}: неизвестная метка "${box.label}".`;
-      }
+      if (!allowedLabels.has(box.label)) return `Рамка #${index + 1}: неизвестная метка "${box.label}".`;
     }
     return null;
   };
@@ -116,17 +178,13 @@ export default function AnnotationPage() {
     submitMutation.mutate(isFinal);
   };
 
-  if (assignmentQuery.isLoading) {
-    return <LoadingSpinner size="lg" />;
-  }
+  if (assignmentQuery.isLoading) return <LoadingSpinner size="lg" />;
 
   if (!assignmentQuery.data) {
     return (
       <div className="card p-8 text-center">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Задание не найдено</h1>
-        <Link to="/labeling" className="btn-primary mt-4 inline-block">
-          Назад
-        </Link>
+        <Link to="/labeling" className="btn-primary mt-4 inline-block">Назад</Link>
       </div>
     );
   }
@@ -149,10 +207,11 @@ export default function AnnotationPage() {
               Пакет {workflowMeta.task_batch_number}/{workflowMeta.task_batch_total} | кадр {workflowMeta.task_batch_index}/{workflowMeta.task_batch_size} в пакете | последовательность {workflowMeta.sequence_index}/{workflowMeta.sequence_length}
             </p>
           ) : null}
+          {isDirty && (
+            <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded">Несохранённые изменения</span>
+          )}
         </div>
-        <Link to="/labeling" className="btn-secondary">
-          К проектам
-        </Link>
+        <Link to="/labeling" className="btn-secondary">К проектам</Link>
       </div>
 
       <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1.45fr),minmax(360px,0.8fr)]">
@@ -189,7 +248,7 @@ export default function AnnotationPage() {
                     Кадры в пакете {batch.batch_number}/{batch.total_batches}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Текущий кадр: {batch.current_index}/{batch.total}
+                    Текущий кадр: {batch.current_index}/{batch.total} | ← → стрелки
                   </div>
                 </div>
                 <div className="grid grid-cols-5 gap-2 lg:grid-cols-10">
@@ -229,19 +288,20 @@ export default function AnnotationPage() {
               currentLabel={selectedLabel}
               selectedBoxIndex={selectedBoxIndex}
               onSelectedBoxIndexChange={setSelectedBoxIndex}
-              onBoxesChange={setBoxes}
+              onBoxesChange={(newBoxes) => { setBoxes(newBoxes); setIsDirty(true); }}
             />
           </div>
         </section>
 
         <aside className="space-y-4">
+          {/* Labels */}
           <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Метки</h2>
               <div className="text-xs text-gray-500 dark:text-gray-400">{labels.length} шт.</div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {labels.map((label) => (
+              {labels.map((label, idx) => (
                 <button
                   key={label.name}
                   type="button"
@@ -249,7 +309,7 @@ export default function AnnotationPage() {
                   className={`rounded-lg px-3 py-2 text-sm font-medium transition ${selectedLabel === label.name ? "text-white shadow-sm" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200"}`}
                   style={selectedLabel === label.name ? { backgroundColor: label.color || "#2563eb" } : undefined}
                 >
-                  {label.name}
+                  {idx + 1}. {label.name}
                 </button>
               ))}
             </div>
@@ -258,78 +318,44 @@ export default function AnnotationPage() {
             </div>
           </section>
 
+          {/* Selected Box Editor */}
           <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Выбранная рамка</h2>
               <button type="button" className="btn-secondary" onClick={removeSelectedBox} disabled={selectedBoxIndex === null}>
-                Удалить
+                Удалить <span className="text-xs opacity-50">Del</span>
               </button>
             </div>
-
             {selectedBox ? (
               <div className="mt-3 space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Метка</label>
-                  <select
-                    className="input-field"
-                    value={selectedBox.label}
-                    onChange={(event) => updateBox(selectedBoxIndex!, { label: event.target.value })}
-                  >
+                  <select className="input-field" value={selectedBox.label} onChange={(event) => updateBox(selectedBoxIndex!, { label: event.target.value })}>
                     {labels.map((label) => (
-                      <option key={label.name} value={label.name}>
-                        {label.name}
-                      </option>
+                      <option key={label.name} value={label.name}>{label.name}</option>
                     ))}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">X</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={selectedBox.x}
-                      onChange={(event) =>
-                        updateBox(selectedBoxIndex!, { x: clampNumber(event.target.value, 0, frame.width - selectedBox.width, selectedBox.x) })
-                      }
-                    />
+                    <input type="number" className="input-field" value={selectedBox.x}
+                      onChange={(event) => updateBox(selectedBoxIndex!, { x: clampNumber(event.target.value, 0, frame.width - selectedBox.width, selectedBox.x) })} />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Y</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={selectedBox.y}
-                      onChange={(event) =>
-                        updateBox(selectedBoxIndex!, { y: clampNumber(event.target.value, 0, frame.height - selectedBox.height, selectedBox.y) })
-                      }
-                    />
+                    <input type="number" className="input-field" value={selectedBox.y}
+                      onChange={(event) => updateBox(selectedBoxIndex!, { y: clampNumber(event.target.value, 0, frame.height - selectedBox.height, selectedBox.y) })} />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Ширина</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={selectedBox.width}
-                      onChange={(event) =>
-                        updateBox(selectedBoxIndex!, {
-                          width: clampNumber(event.target.value, 1, frame.width - selectedBox.x, selectedBox.width),
-                        })
-                      }
-                    />
+                    <input type="number" className="input-field" value={selectedBox.width}
+                      onChange={(event) => updateBox(selectedBoxIndex!, { width: clampNumber(event.target.value, 1, frame.width - selectedBox.x, selectedBox.width) })} />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Высота</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={selectedBox.height}
-                      onChange={(event) =>
-                        updateBox(selectedBoxIndex!, {
-                          height: clampNumber(event.target.value, 1, frame.height - selectedBox.y, selectedBox.height),
-                        })
-                      }
-                    />
+                    <input type="number" className="input-field" value={selectedBox.height}
+                      onChange={(event) => updateBox(selectedBoxIndex!, { height: clampNumber(event.target.value, 1, frame.height - selectedBox.y, selectedBox.height) })} />
                   </div>
                 </div>
               </div>
@@ -340,6 +366,7 @@ export default function AnnotationPage() {
             )}
           </section>
 
+          {/* Instructions */}
           <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Инструкция</h2>
             <div className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">
@@ -361,42 +388,30 @@ export default function AnnotationPage() {
             ) : null}
           </section>
 
+          {/* Submit */}
           <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Комментарий и отправка</h2>
-            <textarea
-              className="input-field mt-3 min-h-[120px]"
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-              placeholder="При необходимости оставьте комментарий по кадру"
-            />
-
+            <textarea className="input-field mt-3 min-h-[120px]" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="При необходимости оставьте комментарий по кадру" />
             <div className="mt-3 space-y-2">
               {assignmentQuery.data.pre_annotations?.boxes?.length ? (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700">
-                  Для этого кадра есть AI-подсказки. Проверьте их перед финальной отправкой.
-                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700">Для этого кадра есть AI-подсказки. Проверьте их перед финальной отправкой.</div>
               ) : null}
               {assignmentQuery.data.quality_signals?.too_fast ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  Предыдущая отправка по этому заданию была отмечена как слишком быстрая.
-                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Предыдущая отправка по этому заданию была отмечена как слишком быстрая.</div>
               ) : null}
               {workflowMeta?.validation_ready ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                  Этот кадр находится в последовательности, готовой для дальнейших межкадровых проверок.
-                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">Этот кадр находится в последовательности, готовой для дальнейших межкадровых проверок.</div>
               ) : null}
               {validationError ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{validationError}</div>
               ) : null}
             </div>
-
             <div className="mt-4 grid grid-cols-2 gap-3">
               <button type="button" className="btn-secondary" onClick={() => submit(false)} disabled={submitMutation.isPending}>
-                Сохранить черновик
+                💾 Сохранить черновик <span className="text-xs opacity-50 ml-1">Ctrl+S</span>
               </button>
               <button type="button" className="btn-primary" onClick={() => submit(true)} disabled={submitMutation.isPending || boxes.length === 0}>
-                Отправить и далее
+                ✅ Отправить и далее <span className="text-xs opacity-50 ml-1">Enter</span>
               </button>
             </div>
           </section>

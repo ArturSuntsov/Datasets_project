@@ -12,6 +12,8 @@ import {
   AuthResponse,
   CreateProjectRequest,
   Dataset,
+  GoldenCandidatesResponse,
+  GoldenCandidate,
   LoginRequest,
   Participant,
   PaymentRequestBody,
@@ -21,13 +23,11 @@ import {
   ProjectImportResponse,
   ProjectOverview,
   QualityMetricsItem,
+  LeaderboardResponse,
+  LeaderboardEntry,
   QualityReviewRequest,
   QueueItem,
   RegisterRequest,
-  ReviewDetail,
-  ReviewQueueItem,
-  ReviewResolveRequest,
-  ReviewResolveResponse,
   SecurityEventItem,
   Task,
   Transaction,
@@ -38,6 +38,7 @@ import {
   ValidationBatchResolveResponse,
   ValidationQueueItem,
   UserStats,
+  VideoInterval,
 } from "../types";
 
 
@@ -262,12 +263,16 @@ export const workflowAPI = {
     const res = await api.get<ProjectOverview>(`/api/projects/${projectId}/overview/`);
     return res.data;
   },
-  async export(projectId: string, format: "coco" | "yolo" | "both" = "both"): Promise<ProjectExportPayload> {
-    const res = await api.get<ProjectExportPayload>(`/api/projects/${projectId}/export/`, { params: { format } });
+  async sync(projectId: string): Promise<ProjectOverview> {
+    const res = await api.post<ProjectOverview>(`/api/projects/${projectId}/workflow/sync/`, {});
     return res.data;
   },
-  async exportArchive(projectId: string, format: "coco" | "yolo" | "both" = "both"): Promise<Blob> {
-    const res = await api.get(`/api/projects/${projectId}/export/`, {
+  async export(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<ProjectExportPayload> {
+    const res = await api.get<ProjectExportPayload>(`/api/cv/projects/${projectId}/export/`, { params: { format } });
+    return res.data;
+  },
+  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<Blob> {
+    const res = await api.get(`/api/cv/projects/${projectId}/export/`, {
       params: { format, download: "1" },
       responseType: "blob",
     });
@@ -275,6 +280,49 @@ export const workflowAPI = {
   },
   async securityEvents(projectId: string): Promise<ApiListResponse<SecurityEventItem>> {
     const res = await api.get<ApiListResponse<SecurityEventItem>>(`/api/projects/${projectId}/security-events/`);
+    return res.data;
+  },
+  async goldenCandidates(projectId: string): Promise<GoldenCandidatesResponse> {
+    const res = await api.get<GoldenCandidatesResponse>(`/api/projects/${projectId}/golden-candidates/`);
+    return res.data;
+  },
+  async promoteGoldenCandidate(projectId: string, goldenFrameId: string, reviewNotes?: string): Promise<any> {
+    const res = await api.post(`/api/projects/${projectId}/golden-candidates/${goldenFrameId}/promote/`, {
+      review_notes: reviewNotes || "",
+    });
+    return res.data;
+  },
+  async listVideoIntervals(projectId: string, params?: { asset_id?: string; status?: string }): Promise<ApiListResponse<VideoInterval>> {
+    const res = await api.get<ApiListResponse<VideoInterval>>(`/api/projects/${projectId}/video-intervals/`, { params });
+    return res.data;
+  },
+  async saveVideoIntervals(
+    projectId: string,
+    assetId: string,
+    intervals: Array<{
+      id?: string;
+      start_frame: number;
+      end_frame: number;
+      source?: "auto" | "manual";
+      confidence?: number;
+      metadata?: Record<string, unknown>;
+    }>
+  ): Promise<{ created: number; updated: number }> {
+    const res = await api.post<{ created: number; updated: number }>(`/api/projects/${projectId}/video-intervals/`, { asset_id: assetId, intervals });
+    return res.data;
+  },
+  async autoDraftVideoIntervals(projectId: string, assetId: string): Promise<{ created: number; updated: number; intervals_total: number }> {
+    const res = await api.post<{ created: number; updated: number; intervals_total: number }>(
+      `/api/projects/${projectId}/video-intervals/${assetId}/auto-draft/`,
+      {}
+    );
+    return res.data;
+  },
+  async validateVideoIntervals(
+    projectId: string,
+    payload: { interval_ids: string[]; decision: "approved" | "rejected"; comment?: string }
+  ): Promise<{ updated: number; decision: string }> {
+    const res = await api.post<{ updated: number; decision: string }>(`/api/projects/${projectId}/video-intervals/validate/`, payload);
     return res.data;
   },
 };
@@ -304,19 +352,31 @@ export const annotatorAPI = {
     const res = await api.post<AssignmentSubmitResponse>(`/api/annotator/assignments/${assignmentId}/submit/`, body);
     return res.data;
   },
-};
-
-export const reviewerAPI = {
-  async queue(): Promise<ApiListResponse<ReviewQueueItem>> {
-    const res = await api.get<ApiListResponse<ReviewQueueItem>>("/api/reviewer/queue/");
+  async intervalChunkQueue(): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/annotator/interval-chunks/queue/");
     return res.data;
   },
-  async detail(reviewId: string): Promise<ReviewDetail> {
-    const res = await api.get<ReviewDetail>(`/api/reviews/${reviewId}/`);
+  async submitIntervalChunk(assignmentId: string, body: { intervals: Array<{ start_frame: number; end_frame: number; confidence?: number; label?: string }>; comment?: string }): Promise<any> {
+    const res = await api.post(`/api/annotator/interval-chunks/${assignmentId}/submit/`, body);
     return res.data;
   },
-  async resolve(reviewId: string, body: ReviewResolveRequest): Promise<ReviewResolveResponse> {
-    const res = await api.post<ReviewResolveResponse>(`/api/reviews/${reviewId}/resolve/`, body);
+  async intervalValidationQueue(): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/annotator/interval-validations/queue/");
+    return res.data;
+  },
+  async submitIntervalValidation(assignmentId: string, body: { decision: "approved" | "rejected"; comment?: string }): Promise<any> {
+    const res = await api.post(`/api/annotator/interval-validations/${assignmentId}/submit/`, body);
+    return res.data;
+  },
+  async bboxValidationQueue(): Promise<ApiListResponse<any>> {
+    const res = await api.get<ApiListResponse<any>>("/api/annotator/bbox-validations/queue/");
+    return res.data;
+  },
+  async submitBBoxValidation(
+    assignmentId: string,
+    body: { decisions: Record<string, string>; golden_decisions: Record<string, string> }
+  ): Promise<any> {
+    const res = await api.post(`/api/annotator/bbox-validations/${assignmentId}/submit/`, body);
     return res.data;
   },
 };
@@ -391,17 +451,40 @@ export const tasksAPI = {
   },
 };
 
-// ------------------ Quality API ------------------
+// ------------------ Quality API (обновлено) ------------------
 export const qualityAPI = {
-  async createReview(body: QualityReviewRequest): Promise<Record<string, unknown>> {
-    const res = await api.post<Record<string, unknown>>("/api/quality/review/", body);
+  async createReview(body: QualityReviewRequest): Promise<QualityReviewResponse> {
+    const res = await api.post<QualityReviewResponse>("/api/quality/review/", body);
     return res.data;
   },
-  async metrics(datasetId: string, params?: { limit?: number; offset?: number }): Promise<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }> {
-    const res = await api.get<{ dataset_id: string; items: QualityMetricsItem[]; limit?: number; offset?: number; total?: number }>(
-      `/api/quality/metrics/${datasetId}/`,
-      { params }
-    );
+
+  async metrics(datasetId: string, params?: { limit?: number; offset?: number }): Promise<{
+    dataset_id: string;
+    items: QualityMetricsItem[];
+    limit?: number;
+    offset?: number;
+    total?: number;
+  }> {
+    const res = await api.get<{
+      dataset_id: string;
+      items: QualityMetricsItem[];
+      limit?: number;
+      offset?: number;
+      total?: number;
+    }>(`/api/quality/metrics/${datasetId}/`, { params });
+    return res.data;
+  },
+};
+
+// ------------------ Rating History API ------------------
+export const ratingAPI = {
+  async history(params?: { limit?: number; offset?: number }): Promise<ApiListResponse<RatingHistoryItem>> {
+    const res = await api.get<ApiListResponse<RatingHistoryItem>>("/api/rating/history/", { params });
+    return res.data;
+  },
+
+  async annotatorHistory(userId: string, params?: { limit?: number; offset?: number }): Promise<ApiListResponse<RatingHistoryItem>> {
+    const res = await api.get<ApiListResponse<RatingHistoryItem>>(`/api/rating/history/${userId}/`, { params });
     return res.data;
   },
 };
@@ -491,12 +574,38 @@ export const statsAPI = {
 };
 
 // ------------------ Leaderboard API ------------------
-// export const leaderboardAPI = {
-//   async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
-//     const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
-//     return res.data;
-//   },
-// };
+export const leaderboardAPI = {
+  async getProjectLeaderboard(projectId: string): Promise<LeaderboardResponse> {
+    const res = await api.get<LeaderboardResponse>(`/api/projects/${projectId}/leaderboard/`);
+    return res.data;
+  },
+};
+
+// ------------------ Dawid-Skene Quality API ------------------
+export const dawidSkeneAPI = {
+  async getProjectQuality(projectId: string): Promise<{
+    project_id: string;
+    annotators: Array<{
+      user_id: string;
+      username: string;
+      accuracy: number;
+      f1: number;
+      error_rate: number;
+      confusion_matrix: Record<string, Record<string, number>>;
+      rating: number;
+      rating_history: Array<{
+        rating_before: number;
+        rating_after: number;
+        rating_delta: number;
+        task_id: string;
+        created_at: string;
+      }>;
+    }>;
+  }> {
+    const res = await api.get(`/api/quality/project/${projectId}/dawid-skene/`);
+    return res.data;
+  },
+};
 
 export function throwApiError(err: unknown): never {
   throw new Error(extractDetail(err));

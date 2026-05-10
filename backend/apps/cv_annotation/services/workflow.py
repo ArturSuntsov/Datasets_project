@@ -3040,7 +3040,7 @@ def _build_csv_export(export_records: List[dict]) -> List[dict]:
     return rows
 
 
-def build_dataset_export(project: Project, export_format: str = "both") -> dict:
+def build_dataset_export(project: Project, export_format: str = "coco") -> dict:
     work_items = list(WorkItem.objects(project=project))
     export_items = _exportable_work_items(work_items)
     export_records = _split_export_items(project, export_items)
@@ -3058,14 +3058,12 @@ def build_dataset_export(project: Project, export_format: str = "both") -> dict:
         "quality_report": _quality_report(project, work_items, assignments, reviews),
         "manifest": _export_manifest(export_records),
     }
-    if export_format in {"coco", "both"}:
+    if export_format == "coco":
         payload.update(_build_coco_export(project, export_records))
-    if export_format in {"yolo", "both"}:
+    if export_format == "yolo":
         payload["yolo"] = _build_yolo_export(project, export_records)
-    if export_format in {"voc", "both"}:
+    if export_format == "voc":
         payload["voc"] = _build_voc_export(export_records)
-    if export_format in {"csv", "both"}:
-        payload["csv"] = _build_csv_export(export_records)
     return payload
 
 
@@ -3094,7 +3092,7 @@ def _csv_rows_to_text(rows: List[dict]) -> str:
     return stream.getvalue()
 
 
-def build_dataset_export_archive(project: Project, export_format: str = "both") -> tuple[str, bytes]:
+def build_dataset_export_archive(project: Project, export_format: str = "coco") -> tuple[str, bytes]:
     payload = build_dataset_export(project, export_format=export_format)
     archive_stream = io.BytesIO()
     with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
@@ -3120,8 +3118,6 @@ def build_dataset_export_archive(project: Project, export_format: str = "both") 
         if "voc" in payload:
             for record in payload["voc"].get("records", []):
                 bundle.writestr(record["annotation_file"], record.get("xml", ""))
-        if "csv" in payload:
-            bundle.writestr("annotations/csv/annotations.csv", _csv_rows_to_text(payload["csv"]))
         for item in payload.get("manifest", []):
             frame_uri = item.get("frame_uri")
             if not frame_uri:

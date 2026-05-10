@@ -607,7 +607,6 @@ export interface ProjectExportPayload {
   voc?: {
     records: Array<Record<string, unknown>>;
   };
-  csv?: Array<Record<string, unknown>>;
 }
 
 export interface ValidationQueueItem {

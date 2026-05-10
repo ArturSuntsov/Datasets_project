@@ -26,7 +26,9 @@ import {
   LeaderboardResponse,
   LeaderboardEntry,
   QualityReviewRequest,
+  QualityReviewResponse,
   QueueItem,
+  RatingHistoryItem,
   RegisterRequest,
   SecurityEventItem,
   Task,
@@ -233,7 +235,7 @@ export const projectsAPI = {
     });
     return res.data;
   },
-  async exportDataset(projectId: string, format: "json" | "csv" | "photo" = "json"): Promise<Blob> {
+  async exportDataset(projectId: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<Blob> {
     const res = await api.get(`/api/projects/${projectId}/export/`, {
       params: { format },
       responseType: "blob",
@@ -267,13 +269,13 @@ export const workflowAPI = {
     const res = await api.post<ProjectOverview>(`/api/projects/${projectId}/workflow/sync/`, {});
     return res.data;
   },
-  async export(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<ProjectExportPayload> {
+  async export(projectId: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<ProjectExportPayload> {
     const res = await api.get<ProjectExportPayload>(`/api/cv/projects/${projectId}/export/`, { params: { format } });
     return res.data;
   },
-  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "both" = "both"): Promise<Blob> {
+  async exportArchive(projectId: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<Blob> {
     const res = await api.get(`/api/cv/projects/${projectId}/export/`, {
-      params: { format, download: "1" },
+      params: { format },
       responseType: "blob",
     });
     return res.data as Blob;
@@ -422,7 +424,7 @@ export const datasetsAPI = {
   async remove(id: string): Promise<void> {
     await api.delete(`/api/datasets/${id}/`);
   },
-  async exportDataset(id: string, format: "json" | "csv" | "photo" = "json"): Promise<Blob> {
+  async exportDataset(id: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<Blob> {
     const res = await api.get(`/api/datasets/${id}/export/`, {
       params: { format },
       responseType: "blob",
@@ -453,8 +455,8 @@ export const tasksAPI = {
 
 // ------------------ Quality API (обновлено) ------------------
 export const qualityAPI = {
-  async createReview(body: QualityReviewRequest): Promise<QualityReviewResponse> {
-    const res = await api.post<QualityReviewResponse>("/api/quality/review/", body);
+  async createReview(body: QualityReviewRequest): Promise<{ id: string }> {
+    const res = await api.post<{ id: string }>("/api/quality/review/", body);
     return res.data;
   },
 

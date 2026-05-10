@@ -1,17 +1,7 @@
-from typing import Any, Dict, List, Optional
-
-import zipfile
-import json
-import pandas as pd
-from io import StringIO
-from datetime import datetime
-import logging
-import tempfile
+from typing import Any
 
 from bson import ObjectId
-from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.http.response import FileResponse
-from mongoengine.errors import ValidationError as MongoValidationError
+from django.http import HttpRequest
 from rest_framework import status
 from rest_framework.exceptions import NotFound, ParseError, PermissionDenied
 from rest_framework.renderers import BaseRenderer
@@ -21,31 +11,42 @@ from rest_framework.views import APIView
 
 from ..datasets_core.models import Dataset
 from ..users.views import authenticate_from_jwt
-from ..cv_annotation.models import WorkAnnotation, WorkItem, FrameItem, ImportAsset
-from ..projects.photo_rendering import resolve_local_path, render_annotated_frame, safe_frame_name
 from .serializers import DatasetSerializer
 
-logger = logging.getLogger(__name__)
 
-
-class _CSVRenderer(BaseRenderer):
-    media_type = "text/csv"
-    format = "csv"
-    charset = "utf-8"
+class _VocRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "voc"
     render_style = "binary"
 
     def render(self, data, accepted_media_type=None, renderer_context=None):
-        # Export endpoint returns HttpResponse directly; renderer isn't used.
         return b""
 
 
-class _PhotoZipRenderer(BaseRenderer):
+class _CocoRenderer(BaseRenderer):
     media_type = "application/zip"
-    format = "photo"
+    format = "coco"
     render_style = "binary"
 
     def render(self, data, accepted_media_type=None, renderer_context=None):
-        # Export endpoint returns HttpResponse directly; renderer isn't used.
+        return b""
+
+
+class _YoloRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "yolo"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return b""
+
+
+class _TfRecordRenderer(BaseRenderer):
+    media_type = "application/octet-stream"
+    format = "tfrecord"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
         return b""
 
 
@@ -129,44 +130,13 @@ class DatasetDetailView(APIView):
 
 
 class DatasetExportView(APIView):
-    renderer_classes = [JSONRenderer, _CSVRenderer, _PhotoZipRenderer]
+    renderer_classes = [JSONRenderer, _VocRenderer, _CocoRenderer, _YoloRenderer, _TfRecordRenderer]
 
     def get_user(self, request: HttpRequest):
         try:
             return authenticate_from_jwt(request)
         except PermissionError as e:
             raise PermissionDenied(str(e))
-
-    def _prepare_annotation_data(self, dataset: Dataset) -> List[Dict]:
-        """Collect annotation data linked to dataset."""
-        try:
-            assets = ImportAsset.objects(dataset=dataset)
-            frame_items = FrameItem.objects(asset__in=list(assets))
-            work_items = WorkItem.objects(frame__in=list(frame_items))
-            annotations = WorkAnnotation.objects(
-                work_item__in=list(work_items),
-                status__in=["submitted", "accepted"]
-            )
-        except Exception:
-            return []
-
-        result = []
-        for ann in annotations:
-            item_data = {
-                "annotation_id": str(ann.id),
-                "work_item_id": str(ann.work_item.id) if ann.work_item else None,
-                "label_data": ann.label_data,
-                "status": ann.status,
-                "created_at": ann.created_at.isoformat() if ann.created_at else None,
-            }
-            try:
-                if ann.work_item and ann.work_item.frame and ann.work_item.frame.asset:
-                    item_data["source_file"] = ann.work_item.frame.asset.file_name
-                    item_data["source_uri"] = ann.work_item.frame.frame_uri
-            except Exception:
-                pass
-            result.append(item_data)
-        return result
 
     def get(self, request: HttpRequest, dataset_id: str, *args, **kwargs):
         user = self.get_user(request)
@@ -180,80 +150,16 @@ class DatasetExportView(APIView):
         if not dataset:
             raise NotFound("Dataset not found.")
 
-        data = self._prepare_annotation_data(dataset)
-        export_format = request.query_params.get("format", "json").lower()
+        export_format = (request.query_params.get("format") or "").strip().lower()
+        if export_format in {"json", "csv", "photo"}:
+            raise ParseError("Legacy formats are removed. Supported formats: voc, coco, yolo, tfrecord.")
+        if export_format not in {"voc", "coco", "yolo", "tfrecord"}:
+            raise ParseError("Unsupported format. Supported formats: voc, coco, yolo, tfrecord.")
 
-        if export_format == "json":
-            response = JsonResponse(
-                data,
-                safe=False,
-                json_dumps_params={"ensure_ascii": False, "indent": 2}
-            )
-            response["Content-Disposition"] = f'attachment; filename="dataset-{dataset_id}-export.json"'
-            return response
+        from apps.projects.models import Task
+        from apps.projects.export_utils import export_project_dataset
 
-        elif export_format == "csv":
-            flat_data = []
-            for item in data:
-                flat_item = {
-                    "annotation_id": item.get("annotation_id"),
-                    "source_file": item.get("source_file", ""),
-                    "source_uri": item.get("source_uri", ""),
-                    "label_data": json.dumps(item.get("label_data", {}), ensure_ascii=False),
-                    "status": item.get("status"),
-                    "created_at": item.get("created_at"),
-                }
-                flat_data.append(flat_item)
-
-            df = pd.DataFrame(flat_data)
-            csv_buffer = StringIO()
-            df.to_csv(csv_buffer, index=False, encoding="utf-8")
-
-            response = HttpResponse(csv_buffer.getvalue(), content_type="text/csv; charset=utf-8")
-            response["Content-Disposition"] = f'attachment; filename="dataset-{dataset_id}-export.csv"'
-            return response
-
-        elif export_format == "photo":
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
-                    tmp_path = tmp.name
-
-                with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                    added_images = set()
-                    for item in data:
-                        source_uri = item.get("source_uri")
-                        source_file = item.get("source_file")
-                        if not source_uri or not source_file:
-                            continue
-
-                        image_key = f"{source_uri}-{source_file}"
-                        if image_key in added_images:
-                            continue
-
-                        try:
-                            image_filename = safe_frame_name(source_uri, source_file)
-                            local_path = resolve_local_path(source_uri)
-                            if not local_path:
-                                logger.warning("Frame file not found for URI %s", source_uri)
-                                continue
-                            with open(local_path, "rb") as img_file:
-                                rendered_bytes = render_annotated_frame(img_file.read(), item.get("label_data") or {})
-                            zf.writestr(f"images/{image_filename}", rendered_bytes)
-                            added_images.add(image_key)
-                        except Exception as e:
-                            logger.warning("Failed to add frame %s: %s", source_uri, str(e))
-                            continue
-
-                fh = open(tmp_path, "rb")
-                return FileResponse(
-                    fh,
-                    content_type="application/zip",
-                    as_attachment=True,
-                    filename=f"dataset-{dataset_id}-frames.zip",
-                )
-            finally:
-                pass
-
-        else:
-            raise ParseError("Неподдерживаемый формат. Используйте json, csv или photo.")
+        related_task = Task.objects(dataset=dataset, project__ne=None).first()
+        if not related_task or not related_task.project:
+            raise ParseError("Dataset export requires a linked CV project. Use /api/projects/<id>/export.")
+        return export_project_dataset(str(related_task.project.id), user, request)

@@ -22,11 +22,11 @@ import {
   ProjectFinalizeResponse,
   ProjectImportResponse,
   ProjectOverview,
-  QualityMetricsItem,
-  QualityReviewResponse,
   LeaderboardResponse,
   LeaderboardEntry,
+  QualityMetricsItem,
   QualityReviewRequest,
+  QualityReviewResponse,
   QueueItem,
   RegisterRequest,
   RatingHistoryItem,
@@ -166,7 +166,10 @@ function extractDetail(err: unknown): string {
 // ------------------ Auth API ------------------
 export const authAPI = {
   async login(body: LoginRequest): Promise<AuthResponse> {
-    const res = await api.post<AuthResponse>("/api/auth/login/", body, {
+    const res = await api.post<AuthResponse>("/api/auth/login/", {
+      identifier: (body as any).email || (body as any).identifier || "",
+      password: (body as any).password,
+    }, {
       headers: { "Content-Type": "application/json" },
     });
     return res.data;
@@ -255,6 +258,13 @@ export const projectsAPI = {
     const res = await api.post<{ summary: Record<string, number>; created: number; skipped: number; total: number; dataset_id: string }>(`/api/projects/${projectId}/generic-tasks/`, body);
     return res.data;
   },
+  async exportDataset(projectId: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/`, {
+      params: { format, download: "1" },
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
 };
 
 export const workflowAPI = {
@@ -282,11 +292,11 @@ export const workflowAPI = {
     const res = await api.post<ProjectOverview>(`/api/projects/${projectId}/workflow/sync/`, {});
     return res.data;
   },
-  async export(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both" = "both"): Promise<ProjectExportPayload> {
+  async export(projectId: string, format: "coco" | "yolo" | "voc" | "tfrecord" | "csv" | "json" | "jsonl" | "both" = "both"): Promise<ProjectExportPayload> {
     const res = await api.get<ProjectExportPayload>(`/api/cv/projects/${projectId}/export/`, { params: { format } });
     return res.data;
   },
-  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both" = "both"): Promise<Blob> {
+  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "tfrecord" | "csv" | "json" | "jsonl" | "both" = "both"): Promise<Blob> {
     const res = await api.get(`/api/cv/projects/${projectId}/export/`, {
       params: { format, download: "1" },
       responseType: "blob",
@@ -443,6 +453,13 @@ export const datasetsAPI = {
   async remove(id: string): Promise<void> {
     await api.delete(`/api/datasets/${id}/`);
   },
+  async exportDataset(id: string, format: "voc" | "coco" | "yolo" | "tfrecord" = "coco"): Promise<Blob> {
+    const res = await api.get(`/api/datasets/${id}/export/`, {
+      params: { format },
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
 };
 
 // ------------------ Tasks API ------------------
@@ -467,8 +484,8 @@ export const tasksAPI = {
 
 // ------------------ Quality API (обновлено) ------------------
 export const qualityAPI = {
-  async createReview(body: QualityReviewRequest): Promise<QualityReviewResponse> {
-    const res = await api.post<QualityReviewResponse>("/api/quality/review/", body);
+  async createReview(body: QualityReviewRequest): Promise<{ id: string }> {
+    const res = await api.post<{ id: string }>("/api/quality/review/", body);
     return res.data;
   },
 

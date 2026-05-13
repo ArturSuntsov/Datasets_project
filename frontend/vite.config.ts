@@ -26,8 +26,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 3000,  // Порт frontend
-      host: true,  // Доступ из Docker сети
+      port: 5173,
+      host: '0.0.0.0',  // Слушать на всех интерфейсах для Docker
       proxy: {
         "/api": {
           target: apiUrl,

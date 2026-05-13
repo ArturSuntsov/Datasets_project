@@ -4,10 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { datasetsAPI } from "../services/api";
 import { Dataset, DatasetUpdateRequest } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store/useAuthStore";
 
 export function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   const datasetQuery = useQuery<Dataset>({
     queryKey: ["dataset", id],
@@ -25,6 +27,31 @@ export function DatasetDetailPage() {
     status: "draft",
     description: "",
   });
+
+  const [exportFormat, setExportFormat] = React.useState<"voc" | "coco" | "yolo" | "tfrecord">("coco");
+  const [isExporting, setIsExporting] = React.useState(false);
+
+  const handleExport = async () => {
+    if (!id) return;
+    setIsExporting(true);
+    try {
+      const blob = await datasetsAPI.exportDataset(id, exportFormat);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const extension = exportFormat === "tfrecord" ? "tfrecord" : "zip";
+      a.download = `dataset-${id}-export.${extension}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Export failed:", error);
+      alert("Ошибка при скачивании датасета. Проверьте права доступа или попробуйте позже.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   React.useEffect(() => {
     if (datasetQuery.data) {
@@ -96,6 +123,33 @@ export function DatasetDetailPage() {
               {JSON.stringify(datasetQuery.data.metadata ?? {}, null, 2)}
             </pre>
           </div>
+
+          {/* Блок экспорта (только для customer) */}
+          {user?.role === 'customer' && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+              <div className="mb-3 text-sm font-semibold">Экспорт разметки</div>
+              <div className="flex items-center gap-4">
+                <select
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value as "voc" | "coco" | "yolo" | "tfrecord")}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-700"
+                >
+                  <option value="voc">PASCAL VOC</option>
+                  <option value="coco">COCO</option>
+                  <option value="yolo">YOLO</option>
+                  <option value="tfrecord">TFRecord</option>
+                </select>
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={handleExport}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {isExporting ? "Скачивание..." : "Скачать"}
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>

@@ -7,10 +7,11 @@ import json
 import secrets
 
 from bson import ObjectId
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest
 from mongoengine import Q
 from rest_framework import permissions, status
 from rest_framework.decorators import action
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 
@@ -30,9 +31,46 @@ from .services.generic_tasks import (
     validate_generic_submission,
 )
 from .services.instructions_upload import InstructionUploadError, save_project_instruction
+from .export_utils import export_project_dataset
 from .task_registry import task_type_registry_payload
 
 PAGE_SIZE = 20
+
+
+class _VocRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "voc"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return b""
+
+
+class _CocoRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "coco"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return b""
+
+
+class _YoloRenderer(BaseRenderer):
+    media_type = "application/zip"
+    format = "yolo"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return b""
+
+
+class _TfRecordRenderer(BaseRenderer):
+    media_type = "application/octet-stream"
+    format = "tfrecord"
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return b""
 
 
 class JWTRequiredMixin:
@@ -168,70 +206,17 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
         project.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(detail=True, methods=["get"], url_path="export")
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="export",
+        renderer_classes=[JSONRenderer, _VocRenderer, _CocoRenderer, _YoloRenderer, _TfRecordRenderer],
+    )
     def export(self, request, pk: str = None, *args, **kwargs) -> Response:
         user, resp = self._require_user(request)
         if resp:
             return resp
-        if not ObjectId.is_valid(pk):
-            return Response({"detail": "Invalid project id"}, status=status.HTTP_400_BAD_REQUEST)
-        project = Project.objects(id=ObjectId(pk)).first()
-        if not project:
-            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-        if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
-            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-        export_format = (request.query_params.get("format") or "both").strip().lower()
-        if export_format not in {"coco", "yolo", "voc", "csv", "json", "jsonl", "both"}:
-            return Response({"detail": "Invalid export format. Use coco, yolo, voc, csv, json, jsonl or both"}, status=status.HTTP_400_BAD_REQUEST)
-
-        from apps.cv_annotation.models import SecurityEvent
-        from apps.cv_annotation.services.security import log_security_event
-        from apps.cv_annotation.services.workflow import build_dataset_export, build_dataset_export_archive
-
-        as_archive = (request.query_params.get("download") or "").strip().lower() in {"1", "true", "yes"}
-        if is_generic_task_project(project):
-            if export_format not in {"json", "jsonl", "csv", "both"}:
-                return Response({"detail": "Invalid generic export format. Use json, jsonl, csv or both"}, status=status.HTTP_400_BAD_REQUEST)
-            if as_archive:
-                archive_name, archive_bytes = build_generic_project_export_archive(project, export_format=export_format)
-                log_security_event(
-                    project=project,
-                    actor=user,
-                    event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                    payload={"format": export_format, "archive": True, "filename": archive_name, "entrypoint": "projects", "generic": True},
-                )
-                response = HttpResponse(archive_bytes, content_type="application/zip")
-                response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-                return response
-            payload = build_generic_project_export(project, export_format=export_format)
-            log_security_event(
-                project=project,
-                actor=user,
-                event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                payload={"format": export_format, "archive": False, "version": payload.get("export_version"), "entrypoint": "projects", "generic": True},
-            )
-            return Response(payload, status=status.HTTP_200_OK)
-
-        if as_archive:
-            archive_name, archive_bytes = build_dataset_export_archive(project, export_format=export_format)
-            log_security_event(
-                project=project,
-                actor=user,
-                event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                payload={"format": export_format, "archive": True, "filename": archive_name, "entrypoint": "projects"},
-            )
-            response = HttpResponse(archive_bytes, content_type="application/zip")
-            response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-            return response
-
-        payload = build_dataset_export(project, export_format=export_format)
-        log_security_event(
-            project=project,
-            actor=user,
-            event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-            payload={"format": export_format, "archive": False, "version": payload.get("export_version"), "entrypoint": "projects"},
-        )
-        return Response(payload, status=status.HTTP_200_OK)
+        return export_project_dataset(pk, user, request, entrypoint="projects")
 
     @action(detail=True, methods=["post"], url_path="instructions/upload")
     def instructions_upload(self, request, pk: str = None, *args, **kwargs) -> Response:
@@ -580,6 +565,17 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
             'current_user': current_user_entry,
             'total_participants': len(leaderboard),
         })
+
+    @action(detail=True, methods=["get"], url_path="export-legacy")
+    def export_dataset(self, request, pk=None, *args, **kwargs) -> Response:
+        """Export annotated dataset of the project."""
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        return Response(
+            {"detail": "Legacy endpoint disabled. Use /export?format=voc|coco|yolo|tfrecord"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class TaskViewSet(JWTRequiredMixin, ViewSet):

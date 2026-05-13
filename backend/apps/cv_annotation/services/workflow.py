@@ -3562,6 +3562,12 @@ def build_dataset_export(project: Project, export_format: str = "both") -> dict:
         payload["yolo"] = _build_yolo_export(project, export_records)
     if export_format in {"voc", "both"}:
         payload["voc"] = _build_voc_export(export_records)
+    if export_format in {"json", "jsonl", "both"}:
+        rows = payload.get("manifest", [])
+        if export_format in {"json", "both"}:
+            payload["json"] = rows
+        if export_format in {"jsonl", "both"}:
+            payload["jsonl"] = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
     if export_format in {"csv", "both"}:
         payload["csv"] = _build_csv_export(export_records)
     return payload
@@ -3618,6 +3624,10 @@ def build_dataset_export_archive(project: Project, export_format: str = "both") 
         if "voc" in payload:
             for record in payload["voc"].get("records", []):
                 bundle.writestr(record["annotation_file"], record.get("xml", ""))
+        if "json" in payload:
+            bundle.writestr("annotations.json", json.dumps(payload.get("json", []), ensure_ascii=False, indent=2))
+        if "jsonl" in payload:
+            bundle.writestr("annotations.jsonl", payload.get("jsonl", ""))
         if "csv" in payload:
             bundle.writestr("annotations/csv/annotations.csv", _csv_rows_to_text(payload["csv"]))
         for item in payload.get("manifest", []):

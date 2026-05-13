@@ -4,24 +4,16 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.core.views import HealthCheckView, MongoDBCheckView, RedisCheckView
-from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView
-from apps.finance.views import PaymentViewSet, TransactionViewSet
-from apps.labeling.views import AnnotationViewSet
+# Импорты ViewSet'ов для роутинга
+from apps.users.views import register, login, me_view, participants_view, user_stats_view, avatar_upload_view, avatar_delete_view, BulkCreateAnnotatorsView
+from apps.datasets_core.views import DatasetCollectionView, DatasetDetailView, DatasetExportView
 from apps.projects.views import ProjectViewSet, TaskViewSet
-from apps.quality.views import MetricsViewSet, ReviewViewSet
+from apps.labeling.views import AnnotationViewSet
+from apps.quality.views import ReviewViewSet, MetricsViewSet
+from apps.finance.views import TransactionViewSet, PaymentViewSet
+from apps.core.views import HealthCheckView, MongoDBCheckView, RedisCheckView
 from apps.quality.views_dawid_skene import project_dawid_skene_view
 from apps.quality.views_iou import check_iou_view
-from apps.users.views import (
-    BulkCreateAnnotatorsView,
-    avatar_delete_view,
-    avatar_upload_view,
-    login,
-    me_view,
-    participants_view,
-    register,
-    user_stats_view,
-)
 
 
 router = DefaultRouter()
@@ -36,37 +28,41 @@ router.register(r"finance/transactions", TransactionViewSet, basename="transacti
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path(
-        "api/",
-        include(
-            [
-                path("health/", HealthCheckView.as_view(), name="health-check"),
-                path("health/mongodb/", MongoDBCheckView.as_view(), name="health-mongodb"),
-                path("health/redis/", RedisCheckView.as_view(), name="health-redis"),
-                path("users/me/", me_view, name="user-me"),
-                path("users/me/stats/", user_stats_view, name="user-stats"),
-                path("users/me/avatar/", avatar_upload_view, name="avatar-upload"),
-                path("users/me/avatar/delete/", avatar_delete_view, name="avatar-delete"),
-                path("users/participants/", participants_view, name="user-participants"),
-                path(
-                    "users/bulk-create-annotators/",
-                    BulkCreateAnnotatorsView.as_view(),
-                    name="bulk-create-annotators",
-                ),
-                path("auth/register/", register, name="auth-register"),
-                path("auth/login/", login, name="auth-login"),
-                path("datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
-                path("datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
-                path(
-                    "quality/project/<str:project_id>/dawid-skene/",
-                    project_dawid_skene_view,
-                    name="project-dawid-skene",
-                ),
-                path("quality/check-iou/", check_iou_view, name="quality-check-iou"),
-            ]
-            + router.urls
-        ),
-    ),
+    
+    # API эндпоинты
+    path("api/", include([
+        # Health checks (проверка сервисов)
+        path("health/", HealthCheckView.as_view(), name="health-check"),
+        path("health/mongodb/", MongoDBCheckView.as_view(), name="health-mongodb"),
+        path("health/redis/", RedisCheckView.as_view(), name="health-redis"),
+
+        # Пользователь (текущий)
+        path("users/me/", me_view, name="user-me"),
+        path("users/me/stats/", user_stats_view, name="user-stats"),
+        path("users/me/avatar/", avatar_upload_view, name="avatar-upload"),
+        path("users/me/avatar/delete/", avatar_delete_view, name="avatar-delete"),
+        path("users/participants/", participants_view, name="user-participants"),
+        
+        # ✅ МАССОВОЕ СОЗДАНИЕ АННОТАТОРОВ
+        path("users/bulk-create-annotators/", BulkCreateAnnotatorsView.as_view(), name="bulk-create-annotators"),
+
+        # Авторизация (function-based views)
+        path("auth/register/", register, name="auth-register"),
+        path("auth/login/", login, name="auth-login"),
+        
+        # Остальные эндпоинты через router
+    ] + router.urls)),
+    
+    # Датасеты (отдельно, чтобы точно срабатывали)
+    path("api/datasets/", DatasetCollectionView.as_view(), name="dataset-list"),
+    path("api/datasets/<str:dataset_id>/", DatasetDetailView.as_view(), name="dataset-detail"),
+    path("api/datasets/<str:dataset_id>/export/", DatasetExportView.as_view(), name="dataset-export"),
+    
+    # Quality эндпоинты
+    path("api/quality/project/<str:project_id>/dawid-skene/", project_dawid_skene_view, name="project-dawid-skene"),
+    path("api/quality/check-iou/", check_iou_view, name="quality-check-iou"),
+    
+    # CV Annotation эндпоинты
     path("api/", include("apps.cv_annotation.urls")),
 ]
 

@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.projects.models import Project, ProjectMembership, Task
+from apps.projects.export_utils import export_project_dataset
 from apps.projects.services.generic_tasks import (
     build_generic_project_export,
     build_generic_project_export_archive,
@@ -135,62 +136,7 @@ def project_export_endpoint(request: HttpRequest, project_id: str):
         user = authenticate_from_jwt(request)
     except PermissionError:
         return JsonResponse({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
-    if not ObjectId.is_valid(project_id):
-        return JsonResponse({"detail": "Invalid project id"}, status=status.HTTP_400_BAD_REQUEST)
-    project = Project.objects(id=ObjectId(project_id)).first()
-    if not project:
-        return JsonResponse({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-    if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
-        return JsonResponse({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    export_format = (request.GET.get("format") or "both").strip().lower()
-    if export_format not in {"coco", "yolo", "voc", "csv", "json", "jsonl", "both"}:
-        return JsonResponse({"detail": "Invalid export format. Use coco, yolo, voc, csv, json, jsonl or both"}, status=status.HTTP_400_BAD_REQUEST)
-
-    as_archive = (request.GET.get("download") or "").strip().lower() in {"1", "true", "yes"}
-    if is_generic_task_project(project):
-        if export_format not in {"json", "jsonl", "csv", "both"}:
-            return JsonResponse({"detail": "Invalid generic export format. Use json, jsonl, csv or both"}, status=status.HTTP_400_BAD_REQUEST)
-        if as_archive:
-            archive_name, archive_bytes = build_generic_project_export_archive(project, export_format=export_format)
-            log_security_event(
-                project=project,
-                actor=user,
-                event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                payload={"format": export_format, "archive": True, "filename": archive_name, "entrypoint": "function", "generic": True},
-            )
-            response = HttpResponse(archive_bytes, content_type="application/zip")
-            response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-            return response
-        payload = build_generic_project_export(project, export_format=export_format)
-        log_security_event(
-            project=project,
-            actor=user,
-            event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-            payload={"format": export_format, "archive": False, "version": payload.get("export_version"), "entrypoint": "function", "generic": True},
-        )
-        return JsonResponse(payload, status=status.HTTP_200_OK, json_dumps_params={"ensure_ascii": False})
-
-    if as_archive:
-        archive_name, archive_bytes = build_dataset_export_archive(project, export_format=export_format)
-        log_security_event(
-            project=project,
-            actor=user,
-            event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-            payload={"format": export_format, "archive": True, "filename": archive_name, "entrypoint": "function"},
-        )
-        response = HttpResponse(archive_bytes, content_type="application/zip")
-        response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-        return response
-
-    payload = build_dataset_export(project, export_format=export_format)
-    log_security_event(
-        project=project,
-        actor=user,
-        event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-        payload={"format": export_format, "archive": False, "version": payload.get("export_version"), "entrypoint": "function"},
-    )
-    return JsonResponse(payload, status=status.HTTP_200_OK, json_dumps_params={"ensure_ascii": False})
+    return export_project_dataset(project_id, user, request, entrypoint="function")
 
 
 class ProjectImportView(AuthenticatedAPIView):
@@ -561,54 +507,7 @@ class ProjectExportView(AuthenticatedAPIView):
             user = self.get_user(request)
         except PermissionError:
             return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
-        project = self.get_project_for_user(user, project_id, require_owner=True)
-        if not project:
-            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
-        export_format = (request.query_params.get("format") or "both").strip().lower()
-        if export_format not in {"coco", "yolo", "voc", "csv", "json", "jsonl", "both"}:
-            return Response({"detail": "Invalid export format. Use coco, yolo, voc, csv, json, jsonl or both"}, status=status.HTTP_400_BAD_REQUEST)
-        as_archive = (request.query_params.get("download") or "").strip().lower() in {"1", "true", "yes"}
-        if is_generic_task_project(project):
-            if export_format not in {"json", "jsonl", "csv", "both"}:
-                return Response({"detail": "Invalid generic export format. Use json, jsonl, csv or both"}, status=status.HTTP_400_BAD_REQUEST)
-            if as_archive:
-                archive_name, archive_bytes = build_generic_project_export_archive(project, export_format=export_format)
-                log_security_event(
-                    project=project,
-                    actor=user,
-                    event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                    payload={"format": export_format, "archive": True, "filename": archive_name, "generic": True},
-                )
-                response = HttpResponse(archive_bytes, content_type="application/zip")
-                response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-                return response
-            payload = build_generic_project_export(project, export_format=export_format)
-            log_security_event(
-                project=project,
-                actor=user,
-                event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                payload={"format": export_format, "archive": False, "version": payload.get("export_version"), "generic": True},
-            )
-            return Response(payload, status=status.HTTP_200_OK)
-        if as_archive:
-            archive_name, archive_bytes = build_dataset_export_archive(project, export_format=export_format)
-            log_security_event(
-                project=project,
-                actor=user,
-                event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-                payload={"format": export_format, "archive": True, "filename": archive_name},
-            )
-            response = HttpResponse(archive_bytes, content_type="application/zip")
-            response["Content-Disposition"] = f'attachment; filename="{archive_name}"'
-            return response
-        payload = build_dataset_export(project, export_format=export_format)
-        log_security_event(
-            project=project,
-            actor=user,
-            event_type=SecurityEvent.EVENT_EXPORT_GENERATED,
-            payload={"format": export_format, "archive": False, "version": payload.get("export_version")},
-        )
-        return Response(payload, status=status.HTTP_200_OK)
+        return export_project_dataset(project_id, user, request, entrypoint="cv_view")
 
 
 class ProjectGoldenCandidatesView(AuthenticatedAPIView):

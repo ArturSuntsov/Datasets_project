@@ -1,12 +1,71 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AnnotationCanvas from "../components/AnnotationCanvas";
 import { annotatorAPI, projectsAPI } from "../services/api";
-import { BoundingBox } from "../types";
+import { BoundingBox, Role } from "../types";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { useAuthStore } from "../store";
 
-function clampNumber(raw: string, min: number, max: number, fallback: number): number {
+type SiteNavItem = {
+  to: string;
+  label: string;
+  icon: string;
+  roles: Role[];
+};
+
+const siteNavItems: SiteNavItem[] = [
+  {
+    to: "/",
+    label: "Дашборд",
+    icon: "📊",
+    roles: ["customer", "annotator", "admin"],
+  },
+  {
+    to: "/projects",
+    label: "Проекты",
+    icon: "📁",
+    roles: ["customer", "admin"],
+  },
+  {
+    to: "/datasets",
+    label: "Датасеты",
+    icon: "🗂️",
+    roles: ["annotator", "admin"],
+  },
+  { to: "/tasks", label: "Задачи", icon: "✅", roles: ["customer", "admin"] },
+  {
+    to: "/labeling",
+    label: "Разметка",
+    icon: "🏷️",
+    roles: ["annotator", "admin"],
+  },
+  {
+    to: "/quality",
+    label: "Качество",
+    icon: "⭐",
+    roles: ["customer", "admin"],
+  },
+  {
+    to: "/finance",
+    label: "Финансы",
+    icon: "💰",
+    roles: ["customer", "annotator", "admin"],
+  },
+  {
+    to: "/profile",
+    label: "Профиль",
+    icon: "👤",
+    roles: ["customer", "annotator", "admin"],
+  },
+];
+
+function clampNumber(
+  raw: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
@@ -16,16 +75,16 @@ export default function AnnotationPage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
   const [boxes, setBoxes] = useState<BoundingBox[]>([]);
   const [comment, setComment] = useState("");
   const [selectedLabel, setSelectedLabel] = useState("");
   const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false); // unsaved changes indicator
-
-  // Undo/Redo external triggers
-  const canvasUndoRef = useRef<() => void>(() => {});
-  const canvasRedoRef = useRef<() => void>(() => {});
+  const [isSiteMenuOpen, setIsSiteMenuOpen] = useState(false);
+  const [isInfoPanelOpen, setIsInfoPanelOpen] = useState(false);
+  const [isCommentOpen, setIsCommentOpen] = useState(false);
 
   const assignmentQuery = useQuery({
     queryKey: ["annotator-assignment", assignmentId],
@@ -45,26 +104,54 @@ export default function AnnotationPage() {
     const initialBoxes = draftBoxes;
     setBoxes(initialBoxes);
     setComment(assignmentQuery.data.comment ?? "");
-    setSelectedLabel((assignmentQuery.data.label_schema?.[0]?.name as string | undefined) ?? "");
+    setSelectedLabel(
+      (assignmentQuery.data.label_schema?.[0]?.name as string | undefined) ??
+        "",
+    );
     setSelectedBoxIndex(initialBoxes.length > 0 ? 0 : null);
     setIsDirty(false);
   }, [assignmentQuery.data]);
 
-  const labels = useMemo(() => assignmentQuery.data?.label_schema ?? [], [assignmentQuery.data]);
-  const allowedLabels = useMemo(() => new Set(labels.map((label) => label.name)), [labels]);
-  const selectedBox = selectedBoxIndex !== null ? boxes[selectedBoxIndex] ?? null : null;
+  const labels = useMemo(
+    () => assignmentQuery.data?.label_schema ?? [],
+    [assignmentQuery.data],
+  );
+  const allowedLabels = useMemo(
+    () => new Set(labels.map((label) => label.name)),
+    [labels],
+  );
+  const selectedBox =
+    selectedBoxIndex !== null ? (boxes[selectedBoxIndex] ?? null) : null;
 
   const submitMutation = useMutation({
-    mutationFn: (isFinal: boolean) => annotatorAPI.submit(assignmentId!, { label_data: { boxes }, comment, is_final: isFinal }),
+    mutationFn: (isFinal: boolean) =>
+      annotatorAPI.submit(assignmentId!, {
+        label_data: { boxes },
+        comment,
+        is_final: isFinal,
+      }),
     onSuccess: async (result) => {
       setIsDirty(false);
       await queryClient.invalidateQueries({ queryKey: ["annotator-queue"] });
       await queryClient.invalidateQueries({ queryKey: ["annotator-projects"] });
-      await queryClient.invalidateQueries({ queryKey: ["annotator-project-detail", assignmentQuery.data?.project_id] });
-      await queryClient.invalidateQueries({ queryKey: ["annotator-assignment", assignmentId] });
-      if (result.assignment_status === "submitted" || result.assignment_status === "accepted" || result.evaluation?.state === "requeued") {
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "annotator-project-detail",
+          assignmentQuery.data?.project_id,
+        ],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["annotator-assignment", assignmentId],
+      });
+      if (
+        result.assignment_status === "submitted" ||
+        result.assignment_status === "accepted" ||
+        result.evaluation?.state === "requeued"
+      ) {
         try {
-          const next = await annotatorAPI.nextProjectAssignment(assignmentQuery.data!.project_id);
+          const next = await annotatorAPI.nextProjectAssignment(
+            assignmentQuery.data!.project_id,
+          );
           navigate(`/labeling/assignments/${next.assignment_id}`);
           return;
         } catch {
@@ -97,6 +184,16 @@ export default function AnnotationPage() {
         return;
       }
 
+      if ((e.key === "i" || e.key === "I") && !e.ctrlKey && !e.metaKey) {
+        setIsInfoPanelOpen(true);
+        return;
+      }
+
+      if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey) {
+        setIsCommentOpen(true);
+        return;
+      }
+
       // Arrow keys — navigate batch
       if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
         // This is handled by the batch item links — we just let the user click
@@ -119,7 +216,8 @@ export default function AnnotationPage() {
       }
     };
     window.addEventListener("annotation:select-label", onSelectLabel);
-    return () => window.removeEventListener("annotation:select-label", onSelectLabel);
+    return () =>
+      window.removeEventListener("annotation:select-label", onSelectLabel);
   }, [labels]);
 
   // ============================================================
@@ -138,13 +236,19 @@ export default function AnnotationPage() {
   }, [isDirty, boxes, comment]);
 
   const updateBox = (index: number, patch: Partial<BoundingBox>) => {
-    setBoxes((current) => current.map((box, boxIndex) => (boxIndex === index ? { ...box, ...patch } : box)));
+    setBoxes((current) =>
+      current.map((box, boxIndex) =>
+        boxIndex === index ? { ...box, ...patch } : box,
+      ),
+    );
     setIsDirty(true);
   };
 
   const removeSelectedBox = () => {
     if (selectedBoxIndex === null) return;
-    setBoxes((current) => current.filter((_, index) => index !== selectedBoxIndex));
+    setBoxes((current) =>
+      current.filter((_, index) => index !== selectedBoxIndex),
+    );
     setSelectedBoxIndex((current) => {
       if (current === null) return null;
       if (boxes.length <= 1) return null;
@@ -159,14 +263,26 @@ export default function AnnotationPage() {
     const frameHeight = assignmentQuery.data.frame.height;
     if (boxes.length === 0) return "Добавьте хотя бы одну рамку.";
     for (const [index, box] of boxes.entries()) {
-      if (!Number.isFinite(box.x) || !Number.isFinite(box.y) || !Number.isFinite(box.width) || !Number.isFinite(box.height)) {
+      if (
+        !Number.isFinite(box.x) ||
+        !Number.isFinite(box.y) ||
+        !Number.isFinite(box.width) ||
+        !Number.isFinite(box.height)
+      ) {
         return `Рамка #${index + 1}: координаты должны быть числами.`;
       }
-      if (box.width <= 0 || box.height <= 0) return `Рамка #${index + 1}: ширина и высота должны быть больше нуля.`;
-      if (box.x < 0 || box.y < 0 || box.x + box.width > frameWidth || box.y + box.height > frameHeight) {
+      if (box.width <= 0 || box.height <= 0)
+        return `Рамка #${index + 1}: ширина и высота должны быть больше нуля.`;
+      if (
+        box.x < 0 ||
+        box.y < 0 ||
+        box.x + box.width > frameWidth ||
+        box.y + box.height > frameHeight
+      ) {
         return `Рамка #${index + 1}: выходит за границы изображения.`;
       }
-      if (!allowedLabels.has(box.label)) return `Рамка #${index + 1}: неизвестная метка "${box.label}".`;
+      if (!allowedLabels.has(box.label))
+        return `Рамка #${index + 1}: неизвестная метка "${box.label}".`;
     }
     return null;
   };
@@ -183,8 +299,12 @@ export default function AnnotationPage() {
   if (!assignmentQuery.data) {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Задание не найдено</h1>
-        <Link to="/labeling" className="btn-primary mt-4 inline-block">Назад</Link>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          Задание не найдено
+        </h1>
+        <Link to="/labeling" className="btn-primary mt-4 inline-block">
+          Назад
+        </Link>
       </div>
     );
   }
@@ -192,231 +312,611 @@ export default function AnnotationPage() {
   const frame = assignmentQuery.data.frame;
   const workflowMeta = assignmentQuery.data.workflow_meta;
   const batch = assignmentQuery.data.task_batch;
+  const visibleSiteNavItems = siteNavItems.filter(
+    (item) => !user?.role || item.roles.includes(user.role),
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{assignmentQuery.data.project_title}</div>
-          <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">Разметка кадра</h1>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Задание {assignmentQuery.data.assignment_id.slice(0, 8)} | кадр {frame.frame_number} | {frame.width}x{frame.height}
-          </p>
-          {workflowMeta?.task_batch_number ? (
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Пакет {workflowMeta.task_batch_number}/{workflowMeta.task_batch_total} | кадр {workflowMeta.task_batch_index}/{workflowMeta.task_batch_size} в пакете | последовательность {workflowMeta.sequence_index}/{workflowMeta.sequence_length}
-            </p>
-          ) : null}
-          {isDirty && (
-            <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded">Несохранённые изменения</span>
-          )}
-        </div>
-        <Link to="/labeling" className="btn-secondary">К проектам</Link>
-      </div>
+    <div className="fixed inset-0 z-[100] flex flex-col bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-white">
+      <header className="relative z-[110] flex min-h-[56px] items-center gap-2 border-b border-gray-200 bg-white px-3 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+          onClick={() => setIsSiteMenuOpen(true)}
+          title="Разделы сайта"
+          aria-label="Разделы сайта"
+        >
+          <span
+            className="flex h-4 w-5 flex-col justify-between"
+            aria-hidden="true"
+          >
+            <span className="block h-0.5 rounded bg-current" />
+            <span className="block h-0.5 rounded bg-current" />
+            <span className="block h-0.5 rounded bg-current" />
+          </span>
+        </button>
 
-      <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1.45fr),minmax(360px,0.8fr)]">
-        <section className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Рамок</div>
-              <div className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{boxes.length}</div>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Активная метка</div>
-              <div className="mt-1 truncate text-base font-semibold text-gray-900 dark:text-white">{selectedLabel || "Не выбрана"}</div>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Статус</div>
-              <div className="mt-1 text-base font-semibold text-gray-900 dark:text-white">{assignmentQuery.data.status}</div>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Размер кадра</div>
-              <div className="mt-1 text-base font-semibold text-gray-900 dark:text-white">{frame.width}x{frame.height}</div>
-            </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold">
+            {assignmentQuery.data.project_title}
           </div>
+          <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+            Кадр {frame.frame_number} · {frame.width}x{frame.height} ·{" "}
+            {boxes.length} рамок
+            {isDirty ? " · несохранено" : ""}
+          </div>
+        </div>
 
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
-            {workflowMeta?.task_batch_number ? (
-              <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-200">
-                Пакетная логика активна: до {workflowMeta.task_batch_target_size || workflowMeta.task_batch_size || 10} кадров в задании и минимум {workflowMeta.min_sequence_size || 3} соседних кадров в последовательности.
-              </div>
-            ) : null}
-            {batch?.items?.length ? (
-              <div className="mb-4 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">
-                    Кадры в пакете {batch.batch_number}/{batch.total_batches}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:tool-draw"))
+            }
+            title="Разметка (D)"
+            aria-label="Разметка"
+          >
+            □
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:tool-pan"))
+            }
+            title="Перемещение (P)"
+            aria-label="Перемещение"
+          >
+            ✥
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() => setIsInfoPanelOpen(true)}
+            title="Информация и настройки (I)"
+            aria-label="Информация и настройки"
+          >
+            i
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:undo"))
+            }
+            title="Отменить (Ctrl+Z)"
+            aria-label="Отменить"
+          >
+            ↶
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:redo"))
+            }
+            title="Повторить (Ctrl+Shift+Z)"
+            aria-label="Повторить"
+          >
+            ↷
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:zoom-out"))
+            }
+            title="Уменьшить масштаб"
+            aria-label="Уменьшить масштаб"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:zoom-in"))
+            }
+            title="Увеличить масштаб"
+            aria-label="Увеличить масштаб"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("annotation:reset-view"))
+            }
+            title="Центрировать изображение"
+            aria-label="Центрировать изображение"
+          >
+            ⊙
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={removeSelectedBox}
+            disabled={selectedBoxIndex === null}
+            title="Удалить рамку (Delete)"
+            aria-label="Удалить рамку"
+          >
+            ⌫
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() => setIsCommentOpen(true)}
+            title="Комментарий (C)"
+            aria-label="Комментарий"
+          >
+            ◐
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-gray-800"
+            onClick={() => submit(false)}
+            disabled={submitMutation.isPending}
+            title="Сохранить черновик (Ctrl+S)"
+            aria-label="Сохранить черновик"
+          >
+            ⬇
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-600 text-white transition hover:bg-blue-700 disabled:opacity-40"
+            onClick={() => submit(true)}
+            disabled={submitMutation.isPending || boxes.length === 0}
+            title="Отправить и далее (Enter)"
+            aria-label="Отправить и далее"
+          >
+            ✓
+          </button>
+        </div>
+      </header>
+
+      {isSiteMenuOpen ? (
+        <div
+          className="fixed inset-0 z-[120] bg-black/30"
+          onClick={() => setIsSiteMenuOpen(false)}
+        >
+          <aside
+            className="flex h-full w-72 min-w-[280px] flex-col border-r border-gray-200 bg-white shadow-2xl transition-colors duration-300 dark:border-gray-700 dark:bg-gray-800"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="h-16 border-b border-gray-200 bg-gray-50 px-6 dark:border-gray-700 dark:bg-gray-900">
+              <NavLink
+                to="/"
+                className="flex h-full items-center gap-2"
+                onClick={() => setIsSiteMenuOpen(false)}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-primary">
+                  <svg
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
+                  </svg>
+                </div>
+                <span className="bg-gradient-primary bg-clip-text text-lg font-bold text-transparent">
+                  Dataset AI
+                </span>
+              </NavLink>
+            </div>
+
+            <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-6">
+              {visibleSiteNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setIsSiteMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200 ${
+                      isActive
+                        ? "bg-primary-100 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300"
+                        : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                    }`
+                  }
+                >
+                  <span className="mr-3 text-lg">{item.icon}</span>
+                  <span className="flex-1">{item.label}</span>
+                </NavLink>
+              ))}
+            </nav>
+
+            <div className="border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900">
+              {user ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-primary font-semibold text-white shadow-md">
+                    {user.username.charAt(0).toUpperCase()}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Текущий кадр: {batch.current_index}/{batch.total} | ← → стрелки
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {user.username}
+                    </p>
+                    <p className="text-xs capitalize text-gray-500 dark:text-gray-400">
+                      {user.role}
+                    </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-5 gap-2 lg:grid-cols-10">
+              ) : (
+                <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                  Not authenticated
+                </p>
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      <main className="min-h-0 flex-1">
+        <AnnotationCanvas
+          imageUrl={assignmentQuery.data.frame_url}
+          value={boxes}
+          labels={labels}
+          currentLabel={selectedLabel}
+          selectedBoxIndex={selectedBoxIndex}
+          onSelectedBoxIndexChange={setSelectedBoxIndex}
+          onBoxesChange={(newBoxes) => {
+            setBoxes(newBoxes);
+            setIsDirty(true);
+          }}
+        />
+      </main>
+
+      {validationError ? (
+        <div className="absolute bottom-4 left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 shadow-lg">
+          {validationError}
+        </div>
+      ) : null}
+
+      {isInfoPanelOpen ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/30"
+          onClick={() => setIsInfoPanelOpen(false)}
+        >
+          <aside
+            className="ml-auto flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-gray-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">Информация</h2>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+                onClick={() => setIsInfoPanelOpen(false)}
+                title="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+
+            <section className="mt-4 space-y-2 text-sm">
+              <div className="font-medium">
+                {assignmentQuery.data.project_title}
+              </div>
+              <div className="text-gray-500 dark:text-gray-400">
+                Задание {assignmentQuery.data.assignment_id.slice(0, 8)}
+              </div>
+              <div>Кадр {frame.frame_number}</div>
+              <div>
+                {frame.width}x{frame.height}
+              </div>
+              <div>Статус: {assignmentQuery.data.status}</div>
+              <div>Рамок: {boxes.length}</div>
+              {workflowMeta?.task_batch_number ? (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-200">
+                  Пакет {workflowMeta.task_batch_number}/
+                  {workflowMeta.task_batch_total}, кадр{" "}
+                  {workflowMeta.task_batch_index}/{workflowMeta.task_batch_size}
+                  , последовательность {workflowMeta.sequence_index}/
+                  {workflowMeta.sequence_length}.
+                </div>
+              ) : null}
+            </section>
+
+            <section className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">Метки</h3>
+                <span className="text-xs text-gray-500">
+                  {labels.length} шт.
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {labels.map((label, index) => (
+                  <button
+                    key={label.name}
+                    type="button"
+                    onClick={() => setSelectedLabel(label.name)}
+                    className={`rounded-md px-3 py-2 text-sm font-medium transition ${selectedLabel === label.name ? "text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200"}`}
+                    style={
+                      selectedLabel === label.name
+                        ? { backgroundColor: label.color || "#2563eb" }
+                        : undefined
+                    }
+                    title={`Метка ${label.name} (${index + 1})`}
+                  >
+                    {index + 1}. {label.name}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">Выбранная рамка</h3>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={removeSelectedBox}
+                  disabled={selectedBoxIndex === null}
+                >
+                  Удалить
+                </button>
+              </div>
+              {selectedBox ? (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      Метка
+                    </label>
+                    <select
+                      className="input-field"
+                      value={selectedBox.label}
+                      onChange={(event) =>
+                        updateBox(selectedBoxIndex!, {
+                          label: event.target.value,
+                        })
+                      }
+                    >
+                      {labels.map((label) => (
+                        <option key={label.name} value={label.name}>
+                          {label.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        X
+                      </label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={selectedBox.x}
+                        onChange={(event) =>
+                          updateBox(selectedBoxIndex!, {
+                            x: clampNumber(
+                              event.target.value,
+                              0,
+                              frame.width - selectedBox.width,
+                              selectedBox.x,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Y
+                      </label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={selectedBox.y}
+                        onChange={(event) =>
+                          updateBox(selectedBoxIndex!, {
+                            y: clampNumber(
+                              event.target.value,
+                              0,
+                              frame.height - selectedBox.height,
+                              selectedBox.y,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Ширина
+                      </label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={selectedBox.width}
+                        onChange={(event) =>
+                          updateBox(selectedBoxIndex!, {
+                            width: clampNumber(
+                              event.target.value,
+                              1,
+                              frame.width - selectedBox.x,
+                              selectedBox.width,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Высота
+                      </label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={selectedBox.height}
+                        onChange={(event) =>
+                          updateBox(selectedBoxIndex!, {
+                            height: clampNumber(
+                              event.target.value,
+                              1,
+                              frame.height - selectedBox.y,
+                              selectedBox.height,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  Выберите рамку на изображении.
+                </div>
+              )}
+            </section>
+
+            {batch?.items?.length ? (
+              <section className="mt-5">
+                <h3 className="text-sm font-semibold">
+                  Кадры в пакете {batch.batch_number}/{batch.total_batches}
+                </h3>
+                <div className="mt-2 grid grid-cols-5 gap-2">
                   {batch.items.map((item, index) => {
-                    const isCurrent = item.assignment_id === assignmentQuery.data.assignment_id;
+                    const isCurrent =
+                      item.assignment_id === assignmentQuery.data.assignment_id;
                     const isOpenable = Boolean(item.assignment_id);
                     const tone =
                       item.assignment_status === "accepted"
                         ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                         : item.assignment_status === "submitted"
                           ? "border-amber-300 bg-amber-50 text-amber-700"
-                          : item.assignment_status === "draft" || item.assignment_status === "in_progress"
+                          : item.assignment_status === "draft" ||
+                              item.assignment_status === "in_progress"
                             ? "border-blue-300 bg-blue-50 text-blue-700"
                             : "border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200";
                     return isOpenable ? (
                       <Link
                         key={item.work_item_id}
                         to={`/labeling/assignments/${item.assignment_id}`}
-                        className={`rounded-lg border px-2 py-2 text-center text-xs font-medium transition ${tone} ${isCurrent ? "ring-2 ring-indigo-400" : ""}`}
+                        className={`rounded-md border px-2 py-2 text-center text-xs font-medium transition ${tone} ${isCurrent ? "ring-2 ring-indigo-400" : ""}`}
                       >
                         {index + 1}
                       </Link>
                     ) : (
-                      <div key={item.work_item_id} className={`rounded-lg border px-2 py-2 text-center text-xs font-medium opacity-70 ${tone}`}>
+                      <div
+                        key={item.work_item_id}
+                        className={`rounded-md border px-2 py-2 text-center text-xs font-medium opacity-70 ${tone}`}
+                      >
                         {index + 1}
                       </div>
                     );
                   })}
                 </div>
-              </div>
+              </section>
             ) : null}
 
-            <AnnotationCanvas
-              imageUrl={assignmentQuery.data.frame_url}
-              value={boxes}
-              labels={labels}
-              currentLabel={selectedLabel}
-              selectedBoxIndex={selectedBoxIndex}
-              onSelectedBoxIndexChange={setSelectedBoxIndex}
-              onBoxesChange={(newBoxes) => { setBoxes(newBoxes); setIsDirty(true); }}
-            />
-          </div>
-        </section>
-
-        <aside className="space-y-4">
-          {/* Labels */}
-          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Метки</h2>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{labels.length} шт.</div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {labels.map((label, idx) => (
-                <button
-                  key={label.name}
-                  type="button"
-                  onClick={() => setSelectedLabel(label.name)}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium transition ${selectedLabel === label.name ? "text-white shadow-sm" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200"}`}
-                  style={selectedLabel === label.name ? { backgroundColor: label.color || "#2563eb" } : undefined}
-                >
-                  {idx + 1}. {label.name}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-              В режиме разметки нарисуйте новую рамку на изображении. Готовую рамку можно выбрать и подправить вручную.
-            </div>
-          </section>
-
-          {/* Selected Box Editor */}
-          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Выбранная рамка</h2>
-              <button type="button" className="btn-secondary" onClick={removeSelectedBox} disabled={selectedBoxIndex === null}>
-                Удалить <span className="text-xs opacity-50">Del</span>
-              </button>
-            </div>
-            {selectedBox ? (
-              <div className="mt-3 space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Метка</label>
-                  <select className="input-field" value={selectedBox.label} onChange={(event) => updateBox(selectedBoxIndex!, { label: event.target.value })}>
-                    {labels.map((label) => (
-                      <option key={label.name} value={label.name}>{label.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">X</label>
-                    <input type="number" className="input-field" value={selectedBox.x}
-                      onChange={(event) => updateBox(selectedBoxIndex!, { x: clampNumber(event.target.value, 0, frame.width - selectedBox.width, selectedBox.x) })} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Y</label>
-                    <input type="number" className="input-field" value={selectedBox.y}
-                      onChange={(event) => updateBox(selectedBoxIndex!, { y: clampNumber(event.target.value, 0, frame.height - selectedBox.height, selectedBox.y) })} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Ширина</label>
-                    <input type="number" className="input-field" value={selectedBox.width}
-                      onChange={(event) => updateBox(selectedBoxIndex!, { width: clampNumber(event.target.value, 1, frame.width - selectedBox.x, selectedBox.width) })} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Высота</label>
-                    <input type="number" className="input-field" value={selectedBox.height}
-                      onChange={(event) => updateBox(selectedBoxIndex!, { height: clampNumber(event.target.value, 1, frame.height - selectedBox.y, selectedBox.height) })} />
-                  </div>
-                </div>
+            <section className="mt-5">
+              <h3 className="text-sm font-semibold">Инструкция</h3>
+              <div className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">
+                {assignmentQuery.data.instructions ||
+                  "Инструкция для проекта пока не добавлена."}
               </div>
-            ) : (
-              <div className="mt-3 rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                Выберите рамку на изображении, чтобы изменить координаты или удалить ее.
-              </div>
-            )}
-          </section>
-
-          {/* Instructions */}
-          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Инструкция</h2>
-            <div className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">
-              {assignmentQuery.data.instructions || "Инструкция для проекта пока не добавлена."}
-            </div>
-            {projectQuery.data?.instructions_file_uri ? (
-              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-                <div>
-                  Файл инструкции:{" "}
-                  <a className="text-blue-600 hover:underline dark:text-blue-400" href={projectQuery.data.instructions_file_uri} target="_blank" rel="noreferrer">
+              {projectQuery.data?.instructions_file_uri ? (
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+                  <a
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                    href={projectQuery.data.instructions_file_uri}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     {projectQuery.data.instructions_file_name || "инструкция"}
                   </a>
+                  <div className="mt-1 text-gray-500 dark:text-gray-400">
+                    v{projectQuery.data.instructions_version ?? 0}
+                    {projectQuery.data.instructions_updated_at
+                      ? ` | ${new Date(projectQuery.data.instructions_updated_at).toLocaleString()}`
+                      : ""}
+                  </div>
                 </div>
-                <div className="mt-1 text-gray-500 dark:text-gray-400">
-                  v{projectQuery.data.instructions_version ?? 0}
-                  {projectQuery.data.instructions_updated_at ? ` | ${new Date(projectQuery.data.instructions_updated_at).toLocaleString()}` : ""}
-                </div>
-              </div>
-            ) : null}
-          </section>
+              ) : null}
+            </section>
+          </aside>
+        </div>
+      ) : null}
 
-          {/* Submit */}
-          <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Комментарий и отправка</h2>
-            <textarea className="input-field mt-3 min-h-[120px]" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="При необходимости оставьте комментарий по кадру" />
+      {isCommentOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setIsCommentOpen(false)}
+        >
+          <section
+            className="w-full max-w-lg rounded-xl bg-white p-4 shadow-2xl dark:bg-gray-950"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">Комментарий</h2>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+                onClick={() => setIsCommentOpen(false)}
+                title="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              className="input-field mt-3 min-h-[160px]"
+              value={comment}
+              onChange={(event) => {
+                setComment(event.target.value);
+                setIsDirty(true);
+              }}
+              placeholder="При необходимости оставьте комментарий по кадру"
+            />
             <div className="mt-3 space-y-2">
               {assignmentQuery.data.pre_annotations?.boxes?.length ? (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700">Для этого кадра есть AI-подсказки. Проверьте их перед финальной отправкой.</div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700">
+                  Для этого кадра есть AI-подсказки. Проверьте их перед
+                  финальной отправкой.
+                </div>
               ) : null}
               {assignmentQuery.data.quality_signals?.too_fast ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Предыдущая отправка по этому заданию была отмечена как слишком быстрая.</div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  Предыдущая отправка по этому заданию была отмечена как слишком
+                  быстрая.
+                </div>
               ) : null}
               {workflowMeta?.validation_ready ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">Этот кадр находится в последовательности, готовой для дальнейших межкадровых проверок.</div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                  Этот кадр находится в последовательности, готовой для
+                  дальнейших межкадровых проверок.
+                </div>
               ) : null}
               {validationError ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{validationError}</div>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {validationError}
+                </div>
               ) : null}
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button type="button" className="btn-secondary" onClick={() => submit(false)} disabled={submitMutation.isPending}>
-                💾 Сохранить черновик <span className="text-xs opacity-50 ml-1">Ctrl+S</span>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setIsCommentOpen(false)}
+              >
+                Готово
               </button>
-              <button type="button" className="btn-primary" onClick={() => submit(true)} disabled={submitMutation.isPending || boxes.length === 0}>
-                ✅ Отправить и далее <span className="text-xs opacity-50 ml-1">Enter</span>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => submit(false)}
+                disabled={submitMutation.isPending}
+              >
+                Сохранить
               </button>
             </div>
           </section>
-        </aside>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -926,7 +926,34 @@ export interface LeaderboardEntry {
 }
 
 export interface LeaderboardResponse {
-  leaderboard: LeaderboardEntry[];
-  current_user: LeaderboardEntry | null;
-  total_participants: number;
+    leaderboard: LeaderboardEntry[];
+    current_user: LeaderboardEntry | null;
+    total_participants: number;
 }
+// ------------------ Annotated Frames (заказчик просматривает размеченные кадры) ------------------
+ export interface AnnotatedFrameBox {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label: string;
+}
+
+export interface AnnotatedFrame {
+    work_item_id: string;
+    frame_url: string;
+    width: number;
+    height: number;
+    boxes: AnnotatedFrameBox[];
+    frame_number: number;
+    timestamp_sec: number;
+    created_at: string;
+}
+
+export interface AnnotatedFramesResponse {
+    items: AnnotatedFrame[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+

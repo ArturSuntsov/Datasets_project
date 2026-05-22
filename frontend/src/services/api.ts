@@ -167,6 +167,25 @@ export const participantsAPI = {
 };
 
 export const projectsAPI = {
+    async getAnnotatedFrames(projectId: string, params?: { limit?: number; offset?: number }): Promise<{
+        items: Array<{
+            work_item_id: string;
+            frame_url: string;
+            width: number;
+            height: number;
+            boxes: Array<{ x: number; y: number; width: number; height: number; label: string }>;
+            frame_number: number;
+            timestamp_sec: number;
+            created_at: string;
+        }>;
+        total: number;
+        limit: number;
+        offset: number;
+    }> {
+        const res = await api.get(`/api/projects/${projectId}/annotated-frames/`, { params });
+        return res.data;
+  },
+
   async create(body: CreateProjectRequest): Promise<Project> {
     const res = await api.post<Project>("/api/projects/", body);
     return res.data;

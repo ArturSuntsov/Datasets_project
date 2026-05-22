@@ -34,6 +34,9 @@ from .services.instructions_upload import InstructionUploadError, save_project_i
 from .export_utils import export_project_dataset
 from .task_registry import task_type_registry_payload
 
+from apps.cv_annotation.models import WorkItem
+from bson import ObjectId
+
 PAGE_SIZE = 20
 
 
@@ -565,6 +568,60 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
             'current_user': current_user_entry,
             'total_participants': len(leaderboard),
         })
+
+    @action(detail=True, methods=["get"], url_path="annotated-frames")
+    def annotated_frames(self, request, pk=None):
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        if not ObjectId.is_valid(pk):
+            return Response({"detail": "Invalid project id"}, status=status.HTTP_400_BAD_REQUEST)
+        project = self.get_queryset_for_user(user).filter(id=ObjectId(pk)).first()
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = WorkItem.objects(
+            project=project,
+            status=WorkItem.STATUS_COMPLETED,
+            validation_status=WorkItem.VALIDATION_APPROVED
+        ).order_by("-created_at")
+
+        try:
+            limit = int(request.query_params.get("limit", 20))
+        except ValueError:
+            limit = 20
+        limit = max(1, min(limit, 100))
+        try:
+            offset = int(request.query_params.get("offset", 0))
+        except ValueError:
+            offset = 0
+
+        total = qs.count()
+        items = qs.skip(offset).limit(limit)
+
+        result = []
+        for wi in items:
+            frame = wi.frame
+            boxes = wi.final_annotation.get("boxes", []) if isinstance(wi.final_annotation, dict) else []
+            result.append({
+                "work_item_id": str(wi.id),
+                "frame_url": frame.frame_uri,
+                "width": frame.width,
+                "height": frame.height,
+                "boxes": boxes,
+                "frame_number": frame.frame_number,
+                "timestamp_sec": frame.timestamp_sec,
+                "created_at": wi.created_at.isoformat() if wi.created_at else None,
+            })
+
+        return Response({
+            "items": result,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="export-legacy")
     def export_dataset(self, request, pk=None, *args, **kwargs) -> Response:

@@ -2,12 +2,14 @@
  * Верхняя панель (Header)
  * - Фиксированная позиция сверху
  * - Переключатель темы
+ * - Уведомления
  * - Профиль пользователя и выход
  */
 
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store";
 import { ThemeToggle } from "./ThemeToggle";
+import { NotificationBell } from "./NotificationBell";
 
 export function Header() {
   const user = useAuthStore((s) => s.user);
@@ -37,6 +39,9 @@ export function Header() {
         {/* Правая часть */}
         <div className="flex items-center gap-3">
           <ThemeToggle />
+          
+          {/* Колокольчик с уведомлениями */}
+          <NotificationBell />
 
           {user ? (
             <div className="flex items-center gap-3">

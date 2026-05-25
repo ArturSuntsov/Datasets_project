@@ -52,6 +52,8 @@ from .preannotation import generate_preannotation_for_frame
 from .security import log_security_event
 from .upload import absolute_media_path, image_dimensions
 from .video_qc import build_video_qc_payload, interpolate_boxes
+#
+from apps.users.notification_utils import notify_task_assigned, notify_task_submitted
 
 DEFAULT_TASK_BATCH_SIZE = 10
 DEFAULT_MIN_SEQUENCE_SIZE = 3
@@ -1178,6 +1180,7 @@ def _build_asset_batches(asset: ImportAsset, frames: List[FrameItem], project: P
 def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int]:
     project = import_session.project
     processed_assets = list(ImportAsset.objects(import_session=import_session, processing_status=ImportAsset.STATUS_PROCESSED))
+    
     if not _is_task(project, TASK_BBOX_ANNOTATION):
         preview = build_import_preview(import_session)
         import_session.preview = preview
@@ -1193,6 +1196,7 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
         import_session.status = ImportSession.STATUS_FINALIZED if processed_assets else ImportSession.STATUS_FAILED
         import_session.save()
         return import_session.summary
+    
     frame_ids = []
     created_work_items = 0
     created_assignments = 0
@@ -1201,20 +1205,24 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
     local_assignment_counts: Dict[str, int] = {}
     image_frames: List[FrameItem] = []
     batch_entries: List[dict] = []
+    
     for asset in processed_assets:
         asset_frames = list(FrameItem.objects(project=project, asset=asset).order_by("created_at", "frame_number"))
         if asset.asset_type == ImportAsset.TYPE_IMAGE:
             image_frames.extend(asset_frames)
         else:
             batch_entries.extend(_build_asset_batches(asset, asset_frames, project))
+    
     if image_frames:
         batch_entries.extend(_build_frame_batches(f"{import_session.id}:images", image_frames, project))
 
     workflow_batches_total = len({entry["workflow_meta"]["task_batch_id"] for entry in batch_entries})
+    
     for entry in batch_entries:
         frame = entry["frame"]
         workflow_meta = entry["workflow_meta"]
         work_item = WorkItem.objects(project=project, frame=frame).first()
+        
         if not work_item:
             work_item = WorkItem(project=project, frame=frame)
             work_item.workflow_meta = workflow_meta
@@ -1237,29 +1245,33 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
         else:
             work_item.workflow_meta = workflow_meta
             work_item.save()
+            
         if workflow_meta.get("validation_ready"):
             validation_ready_items += 1
-        existing_annotators = {str(assignment.annotator.id) for assignment in Assignment.objects(work_item=work_item)}
+            
+        existing_annotator_ids = {str(assignment.annotator.id) for assignment in Assignment.objects(work_item=work_item)}
         required_assignments = max(1, int(project.assignments_per_task or 1))
         candidate_annotators = select_annotators_for_project(project, max(50, required_assignments * 3), stage="bbox_annotation")
+        
         selected_annotators = sorted(
-            [user for user in candidate_annotators if str(user.id) not in existing_annotators],
+            [user for user in candidate_annotators if str(user.id) not in existing_annotator_ids],
             key=lambda user: (local_assignment_counts.get(str(user.id), 0), str(user.id)),
-        )[: max(0, required_assignments - len(existing_annotators))]
-        if len(existing_annotators) + len(selected_annotators) < int(project.assignments_per_task or 1):
+        )[: max(0, required_assignments - len(existing_annotator_ids))]
+        
+        if len(existing_annotator_ids) + len(selected_annotators) < int(project.assignments_per_task or 1):
             _mark_work_item_validation_blocked(
                 work_item,
                 WorkItem.VALIDATION_INSUFFICIENT_ANNOTATORS,
                 "Not enough independent annotators are available for bbox annotation",
                 {
                     "required_assignments": int(project.assignments_per_task or 1),
-                    "available_assignments": len(existing_annotators) + len(selected_annotators),
+                    "available_assignments": len(existing_annotator_ids) + len(selected_annotators),
                 },
             )
+        
         next_order = Assignment.objects(work_item=work_item).count()
+        
         for annotator in selected_annotators:
-            if str(annotator.id) in existing_annotators:
-                continue
             assignment = Assignment(
                 project=project,
                 work_item=work_item,
@@ -1272,13 +1284,46 @@ def create_work_items_for_import(import_session: ImportSession) -> Dict[str, int
             created_assignments += 1
             local_assignment_counts[str(annotator.id)] = local_assignment_counts.get(str(annotator.id), 0) + 1
             queue_position += 1
+            
+            # ✅ Уведомление о назначении задачи (ПРАВИЛЬНЫЙ ВЫЗОВ)
+            from apps.users.notification_utils import notify_task_assigned
+            notify_task_assigned(
+                user=annotator,
+                assignment_id=str(assignment.id),
+                project_id=str(project.id),
+                project_title=project.title,
+                project_type="bbox"
+            )
+            
             log_security_event(
                 project=project,
                 event_type=SecurityEvent.EVENT_ASSIGNMENT_DISTRIBUTION,
                 payload={"work_item_id": str(work_item.id), "annotator_id": str(annotator.id)},
             )
             next_order += 1
+        
         frame_ids.append(str(frame.id))
+    
+    preview = build_import_preview(import_session)
+    import_session.preview = preview
+    cleanup_summary = {
+        "duplicates_removed": sum(int((asset.metadata or {}).get("cleanup", {}).get("removed_duplicates", 0)) for asset in processed_assets),
+        "invalid_frames_removed": sum(int((asset.metadata or {}).get("cleanup", {}).get("removed_invalid_frames", 0)) for asset in processed_assets),
+        "duplicate_assets": [str(asset.id) for asset in ImportAsset.objects(import_session=import_session, processing_status=ImportAsset.STATUS_FAILED) if "Duplicate asset" in (asset.error_message or "")],
+    }
+    import_session.summary = {
+        "work_items_created": created_work_items,
+        "assignments_created": created_assignments,
+        "frame_ids": frame_ids,
+        "workflow_batches_total": workflow_batches_total,
+        "validation_ready_items": validation_ready_items,
+        "workflow_settings": _workflow_settings(project),
+        "cleanup": cleanup_summary,
+    }
+    import_session.status = ImportSession.STATUS_FINALIZED if created_work_items or processed_assets else ImportSession.STATUS_FAILED
+    import_session.save()
+    return import_session.summary
+        
 
     preview = build_import_preview(import_session)
     import_session.preview = preview
@@ -2489,6 +2534,18 @@ def save_assignment_annotation(assignment: Assignment, label_data: dict, comment
             real_items_per_batch=settings["bbox_real_items_per_batch"],
             golden_items_per_batch=settings["bbox_golden_items_per_batch"],
         )
+
+    # ✅ Уведомление об отправке разметки (ИСПРАВЛЕНО)
+    if is_final:
+        from apps.users.notification_utils import notify_task_submitted
+        notify_task_submitted(
+            annotator=assignment.annotator,
+            reviewer=assignment.project.owner,
+            assignment_id=str(assignment.id),
+            project_id=str(assignment.project.id),
+            project_title=assignment.project.title
+        )
+
     return annotation, evaluation
 
 

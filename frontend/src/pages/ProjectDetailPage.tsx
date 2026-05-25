@@ -6,6 +6,7 @@ import { projectsAPI, workflowAPI, dawidSkeneAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
 import { getTaskFlowCopy, getTaskGroupLabel } from "../lib/taskFlowCopy";
+import type { ProjectExportArtifactName, ProjectExportFormat } from "../types";
 
 function DawidSkeneQuality({ projectId }: { projectId: string }) {
   const qualityQuery = useQuery({
@@ -101,9 +102,6 @@ function DawidSkeneQuality({ projectId }: { projectId: string }) {
   );
 }
 
-// ============================================================
-// HELPERS
-// ============================================================
 function MetricBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded bg-white p-2 dark:bg-gray-900">
@@ -147,9 +145,6 @@ function taskDescription(taskType: string) {
   return map[taskType] ?? "";
 }
 
-// ============================================================
-// MAIN PAGE COMPONENT
-// ============================================================
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -161,15 +156,15 @@ export default function ProjectDetailPage() {
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
-  const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both">("both");
+  const [exportFormat, setExportFormat] = useState<ProjectExportFormat>("both");
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both">("both");
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUploadError, setInstructionUploadError] = useState<string | null>(null);
   const [genericTasksInput, setGenericTasksInput] = useState("");
   const [genericTasksFile, setGenericTasksFile] = useState<File | null>(null);
   const [genericTasksError, setGenericTasksError] = useState<string | null>(null);
+  const [artifact, setArtifact] = useState<ProjectExportArtifactName>("validated_dataset");
 
   // Запросы
   const projectQuery = useQuery({ queryKey: ["project", projectId], queryFn: () => projectsAPI.get(projectId!), enabled: !!projectId });
@@ -214,29 +209,29 @@ export default function ProjectDetailPage() {
       setFinalizeError(null);
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
-    onError: (err: any) => {
-      setFinalizeError(err?.response?.data?.detail || err?.response?.data?.error || "Finalize failed");
-    },
+    onError: (err: any) => setFinalizeError(err?.response?.data?.detail || err?.message || "Ошибка финализации"),
   });
 
   const exportMutation = useMutation({
-    mutationFn: async () => workflowAPI.export(projectId!, exportFormat),
+    mutationFn: async () => workflowAPI.export(projectId!, exportFormat, artifact),
     onSuccess: (payload) => {
-      setExportPayload(JSON.stringify(payload, null, 2));
+      const url = URL.createObjectURL(payload as unknown as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `project-${projectId}-${exportFormat}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
     },
   });
 
   const exportArchiveMutation = useMutation({
-    mutationFn: async ({ artifact, format }: { artifact: ProjectExportArtifactName | string; format: ProjectExportFormat }) => {
-      const blob = await workflowAPI.exportArchive(projectId!, format, artifact);
-      return { blob, artifact, format };
-    },
-    onSuccess: ({ blob, artifact, format }) => {
+    mutationFn: async () => workflowAPI.exportArchive(projectId!, exportFormat, artifact),
+    onSuccess: (blob) => {
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `project-${projectId}-${exportFormat}.zip`;
-      anchor.click();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `project-${projectId}-${exportFormat}.zip`;
+      a.click();
       URL.revokeObjectURL(url);
       setArchiveError(null);
     },
@@ -282,17 +277,26 @@ export default function ProjectDetailPage() {
   // Вычисляемые значения
   const overview = overviewQuery.data;
   const taskType = String(projectQuery.data?.task_type || "bbox_annotation");
-  const isGeneric = ["text_annotation", "image_annotation", "classification", "comparison"].includes(taskType);
-  const isValidation = ["video_interval_validation", "bbox_validation"].includes(taskType);
+  const taskCopy = getTaskFlowCopy(taskType);
+  const isGenericTask = ["text_annotation", "image_annotation", "classification", "comparison"].includes(taskType);
+  const isGeneric = isGenericTask;
   const canUpload = ["bbox_annotation", "video_annotation", "image_annotation"].includes(taskType);
   const totalWI = Number(overview?.work_items?.total || 0);
+  const totalWorkItems = totalWI;
   const completedWI = Number(overview?.work_items?.completed || 0);
+  const completedWorkItems = completedWI;
   const approvedExport = Number((overview?.work_items as any)?.validation_approved || 0);
+  const approvedExportItems = approvedExport;
   const validationPending = Number((overview?.work_items as any)?.validation_pending || 0);
+  const validationPendingItems = validationPending;
   const validationDisputed = Number((overview?.work_items as any)?.validation_disputed || 0);
+  const validationDisputedItems = validationDisputed;
   const insufficientAnnotators = Number((overview?.work_items as any)?.insufficient_annotators || 0);
+  const insufficientAnnotatorItems = insufficientAnnotators;
   const insufficientValidators = Number((overview?.work_items as any)?.insufficient_validators || 0);
+  const insufficientValidatorItems = insufficientValidators;
   const exportBlocked = Math.max(0, totalWI - approvedExport);
+  const exportBlockedItems = exportBlocked;
   const exportReadyPercent = totalWI > 0 ? Math.round((approvedExport / totalWI) * 100) : 0;
   const exportReady = approvedExport > 0;
   const completion = totalWI > 0 ? Math.round((completedWI / totalWI) * 100) : 0;
@@ -301,25 +305,15 @@ export default function ProjectDetailPage() {
   const lastPreview = uploadMutation.data?.preview;
   const readyImportId = activeImportId || String(overview?.imports?.latest_ready_import_id || "");
   const hasVideoAssets = Array.isArray(overview?.imports?.video_asset_ids) && overview.imports.video_asset_ids.length > 0;
-  const totalWorkItems = Number(overview?.work_items?.total || 0);
-  const completedWorkItems = Number(overview?.work_items?.completed || 0);
-  const approvedExportItems = Number((overview?.work_items as any)?.validation_approved || 0);
-  const validationPendingItems = Number((overview?.work_items as any)?.validation_pending || 0);
-  const validationDisputedItems = Number((overview?.work_items as any)?.validation_disputed || 0);
-  const insufficientAnnotatorItems = Number((overview?.work_items as any)?.insufficient_annotators || 0);
-  const insufficientValidatorItems = Number((overview?.work_items as any)?.insufficient_validators || 0);
-  const exportBlockedItems = Math.max(0, totalWorkItems - approvedExportItems);
-  const exportReadyPercent = totalWorkItems > 0 ? Math.round((approvedExportItems / totalWorkItems) * 100) : 0;
-  const exportReady = approvedExportItems > 0;
-  const goldenCandidates = goldenCandidatesQuery.data?.items ?? [];
-  const goldenActiveCount = Number(goldenCandidatesQuery.data?.active_count ?? 0);
-  const goldenCandidateCount = Number(goldenCandidatesQuery.data?.candidate_count ?? 0);
-  const goldenRetiredCount = Number(goldenCandidatesQuery.data?.retired_count ?? 0);
+  const goldenCandidates = goldenQuery.data?.items ?? [];
+  const goldenActiveCount = Number(goldenQuery.data?.active_count ?? 0);
+  const goldenCandidateCount = Number(goldenQuery.data?.candidate_count ?? 0);
+  const goldenRetiredCount = Number(goldenQuery.data?.retired_count ?? 0);
   const overviewAny = overview as any;
   const bboxValidationAssigned = Number(overviewAny?.bbox_validation?.assigned || 0);
-  const canDeleteProject = user?.role === "admin" || (user?.role === "customer" && projectQuery.data?.owner_id === user.id);
-  const sourceSync = overview?.source_sync;
-  const readinessGates = [
+  const canUploadMedia = canUpload;
+  
+  const fallbackReadinessGates = [
     { label: "Импорт готов", ready: Number(overview?.imports?.ready || 0) > 0 || Number(overview?.imports?.finalized || 0) > 0 },
     { label: "Интервалы размечаются", ready: Number((overview as any)?.intervals?.total || 0) > 0 },
     { label: "Интервалы валидируются", ready: Number((overview as any)?.intervals?.validation_assigned || 0) > 0 },
@@ -327,41 +321,18 @@ export default function ProjectDetailPage() {
     { label: "BBox‑валидация идёт", ready: bboxValidationAssigned > 0 || validationPending > 0 },
     { label: "Экспорт доступен", ready: exportReady },
   ];
+  
   const readinessGates = overview?.readiness_gates?.length ? overview.readiness_gates : fallbackReadinessGates;
   const nextAction = overview?.next_action;
 
-  const completion = useMemo(() => {
-    return totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
-  }, [completedWorkItems, totalWorkItems]);
-
-  if (projectQuery.isLoading) {
-    return <LoadingSpinner size="lg" />;
-  }
+  if (projectQuery.isLoading) return <LoadingSpinner size="lg" />;
 
   if (!projectQuery.data) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-          Project not found.
-        </div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">Проект не найден.</div>
         <div className="flex flex-wrap gap-3">
-          <Link to="/projects" className="btn-secondary">
-            Back to projects
-          </Link>
-          {canTryDeleteMissingProject && projectId ? (
-            <button
-              type="button"
-              className="btn-secondary border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
-              disabled={deleteProjectMutation.isPending}
-              onClick={() => {
-                if (window.confirm("Remove this unavailable project from your workspace?")) {
-                  deleteProjectMutation.mutate();
-                }
-              }}
-            >
-              {deleteProjectMutation.isPending ? "Deleting..." : "Delete project"}
-            </button>
-          ) : null}
+          <Link to="/projects" className="btn-secondary">← К проектам</Link>
         </div>
         {deleteError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{deleteError}</div> : null}
       </div>
@@ -379,27 +350,17 @@ export default function ProjectDetailPage() {
           <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{projectQuery.data.title}</h1>
           <p className="mt-3 max-w-3xl text-sm text-gray-600 dark:text-gray-400">{projectQuery.data.description}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link to={`/projects/${projectId}/workflow`} className="btn-secondary">
-            Настройка разметки
-          </Link>
-          {["video_annotation", "video_interval_validation"].includes(taskType) ? (
-            <Link to={`/projects/${projectId}/intervals`} className="btn-secondary">
-              Интервалы
-            </Link>
-          ) : null}
-          {!isGenericTask ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={`/projects/${projectId}/workflow`} className="btn-secondary">Настройка разметки</Link>
+          {!isGenericTask && (
             <>
-              <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-                {exportMutation.isPending ? "Exporting..." : exportReady ? "Export dataset" : "Export report"}
-              </button>
               <button className="btn-secondary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
-                {exportArchiveMutation.isPending ? "Preparing zip..." : exportReady ? "Download zip" : "Download report zip"}
+                {exportArchiveMutation.isPending ? "Подготовка..." : exportReady ? "📥 Скачать датасет" : "📄 Отчёт"}
               </button>
             </>
-          ) : null}
-          <button className="btn-secondary" onClick={() => syncWorkflowMutation.mutate()} disabled={syncWorkflowMutation.isPending}>
-            {syncWorkflowMutation.isPending ? "Syncing..." : "Sync workflow"}
+          )}
+          <button className="btn-secondary" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+            {syncMutation.isPending ? "Синхронизация..." : "🔄 Синхронизировать"}
           </button>
           {canDelete && (
             <button
@@ -407,12 +368,12 @@ export default function ProjectDetailPage() {
               onClick={() => { if (window.confirm("Удалить проект? Это действие необратимо.")) deleteMutation.mutate(); }}
               disabled={deleteMutation.isPending}
             >
-              {deleteProjectMutation.isPending ? "Deleting..." : "Delete project"}
+              {deleteMutation.isPending ? "Удаление..." : "🗑️ Удалить"}
             </button>
           )}
         </div>
       </div>
-      {deleteError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{deleteError}</div> : null}
+      {deleteError && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{deleteError}</div>}
 
       {/* Источник данных */}
       {projectQuery.data.source_project_id && (
@@ -435,6 +396,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Generic task setup */}
       {isGenericTask ? (
         <div className="card space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -465,68 +427,47 @@ export default function ProjectDetailPage() {
             <button
               type="button"
               className="btn-primary"
-              disabled={createGenericTasksMutation.isPending || (!genericTasksInput.trim() && !genericTasksFile)}
-              onClick={() => createGenericTasksMutation.mutate()}
+              disabled={genericMutation.isPending || (!genericTasksInput.trim() && !genericTasksFile)}
+              onClick={() => genericMutation.mutate()}
             >
-              {createGenericTasksMutation.isPending ? "Creating..." : "Create generic tasks"}
+              {genericMutation.isPending ? "Creating..." : "Create generic tasks"}
             </button>
           </div>
           {genericTasksError ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{genericTasksError}</div> : null}
-          {createGenericTasksMutation.data ? (
+          {genericMutation.data ? (
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-              Created {createGenericTasksMutation.data.created}, skipped {createGenericTasksMutation.data.skipped}, total {createGenericTasksMutation.data.total}.
+              Created {genericMutation.data.created}, skipped {genericMutation.data.skipped}, total {genericMutation.data.total}.
             </div>
           ) : null}
         </div>
       ) : null}
 
+      {/* Статистика */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-        <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Frames</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{Number(overview?.imports?.frames_total ?? 0)}</div>
-        </div>
-        <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Work items</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{totalWorkItems}</div>
-        </div>
-        <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Export ready</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{approvedExportItems}/{totalWorkItems}</div>
-          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{exportReadyPercent}% validated</div>
-        </div>
-        <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Low-agreement requeue</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{Number(overview?.assignments?.disputed ?? 0)}</div>
-        </div>
-        <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Completion</div>
-          <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{completion}%</div>
-        </div>
+        <StatCard label="Кадры" value={Number(overview?.imports?.frames_total ?? 0)} />
+        <StatCard label="Задания" value={totalWorkItems} />
+        <StatCard label="Готово к экспорту" value={`${approvedExportItems}/${totalWorkItems}`} sub={`${exportReadyPercent}% проверено`} />
+        <StatCard label="На доработку" value={Number(overview?.assignments?.disputed ?? 0)} />
+        <StatCard label="Завершено" value={`${completion}%`} />
       </div>
 
-      <div className={`rounded-lg border p-4 ${exportReadyPercent >= 80 ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"}`}>
+      {/* Готовность экспорта */}
+      <div className={`rounded-lg border p-4 ${exportReadyPercent >= 80 ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">Dataset export readiness</div>
-            <div className="mt-1 text-xs">
-              Export includes only approved bbox validation items. Annotation completion is {completion}%, but validated export readiness is {exportReadyPercent}%.
-            </div>
+            <div className="text-sm font-semibold">Готовность датасета к экспорту</div>
+            <div className="mt-1 text-xs">Экспорт включает только одобренные кадры bbox‑валидации. Разметка завершена на {completion}%, готовность к экспорту — {exportReadyPercent}%.</div>
           </div>
           <div className="text-right text-sm">
-            <div className="font-semibold">{approvedExportItems} included / {exportBlockedItems} excluded</div>
-            <div className="text-xs opacity-80">pending {validationPendingItems}, disputed {validationDisputedItems}, insufficient {insufficientAnnotatorItems + insufficientValidatorItems}</div>
+            <div className="font-semibold">{approvedExportItems} включено / {exportBlockedItems} исключено</div>
+            <div className="text-xs opacity-80">ожидает {validationPendingItems}, спорных {validationDisputedItems}, недостаточно {insufficientAnnotatorItems + insufficientValidatorItems}</div>
           </div>
         </div>
       </div>
 
       {/* Workflow pipeline */}
       <div className="card space-y-4">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Готовность workflow</h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            Выгрузка включает только кадры с завершенной bbox-разметкой и подтвержденной bbox-валидацией.
-          </p>
-        </div>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">🔄 Готовность workflow</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {readinessGates.map((gate) => (
             <div key={gate.label} className={`rounded-lg border p-3 text-sm ${gate.ready ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-gray-50 text-gray-600"}`}>
@@ -535,22 +476,11 @@ export default function ProjectDetailPage() {
             </div>
           ))}
         </div>
-        {!exportReady ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-            Экспорт станет доступен после появления хотя бы одного `validation_approved` кадра.
-            <div className="mt-2">
-              Сейчас: ожидает bbox-валидации {validationPendingItems}, назначено пакетов валидации {bboxValidationAssigned}, спорных {validationDisputedItems}, нехватка исполнителей {insufficientAnnotatorItems}, нехватка валидаторов {insufficientValidatorItems}.
-            </div>
-            <div className="mt-2">
-              Если это старый проект, нажмите Sync workflow: система попробует пересобрать очередь валидации по уже готовой разметке.
-            </div>
+        {!exportReady && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            Экспорт станет доступен после появления хотя бы одного проверенного кадра. Сейчас: ожидает валидации {validationPending}, назначено пакетов {bboxValidationAssigned}, спорных {validationDisputed}.
           </div>
-        ) : null}
-        {syncWorkflowMutation.data?.sync ? (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-            Sync complete: bbox assignments created {syncWorkflowMutation.data.sync.bbox_annotation_created}, interval assignments created {syncWorkflowMutation.data.sync.interval_annotation_created}, evaluated {syncWorkflowMutation.data.sync.evaluated_items}, bbox validation batches created {syncWorkflowMutation.data.sync.bbox_validation_created}.
-          </div>
-        ) : null}
+        )}
       </div>
 
       {/* Golden pool */}
@@ -558,18 +488,15 @@ export default function ProjectDetailPage() {
         <h2 className="text-xl font-semibold text-gray-900 dark:text-white">🏅 Golden pool</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Скрытый набор эталонных кадров для контроля качества.</p>
         {goldenQuery.isLoading ? <LoadingSpinner size="sm" /> :
-         (goldenQuery.data?.items ?? []).length === 0 ? <p className="text-sm text-gray-500">Пока нет эталонных кадров.</p> :
-         <p className="text-sm">Активных: {goldenQuery.data?.active_count ?? 0} · Кандидатов: {goldenQuery.data?.candidate_count ?? 0}</p>}
+         (goldenCandidates.length === 0) ? <p className="text-sm text-gray-500">Пока нет эталонных кадров.</p> :
+         <p className="text-sm">Активных: {goldenActiveCount} · Кандидатов: {goldenCandidateCount}</p>}
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        {/* Импорт */}
         <div className="card space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{taskCopy.importTitle}</h2>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              {taskCopy.importDescription}
-            </p>
-          </div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">📤 Импорт изображений</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Загрузите изображения или видео. Видео будет нарезано на кадры согласно настройкам.</p>
           <input
             type="file"
             multiple
@@ -578,12 +505,12 @@ export default function ProjectDetailPage() {
             disabled={!canUploadMedia}
             className="block w-full text-sm text-gray-600 dark:text-gray-300"
           />
-          {uploadQueue.length > 0 ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
-              {uploadQueue.map((file) => (
-                <div key={file.name} className="flex items-center justify-between py-1">
-                  <span>{file.name}</span>
-                  <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+          {uploadQueue.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
+              {uploadQueue.map((f) => (
+                <div key={f.name} className="flex justify-between py-1">
+                  <span>{f.name}</span>
+                  <span>{(f.size / 1024 / 1024).toFixed(2)} MB</span>
                 </div>
               ))}
             </div>
@@ -595,50 +522,39 @@ export default function ProjectDetailPage() {
             <button className="btn-secondary" onClick={() => finalizeMutation.mutate()} disabled={!canUpload || !readyImportId || finalizeMutation.isPending}>
               {finalizeMutation.isPending ? "Финализация..." : "Финализировать импорт"}
             </button>
-            <select
-              className="input-field w-auto"
-              value={exportFormat}
-              onChange={(event) => setExportFormat(event.target.value as "coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both")}
-            >
-              {isGenericTask ? <option value="both">Export: JSON + JSONL + CSV</option> : <option value="both">Export: COCO + YOLO + VOC + CSV</option>}
-              {isGenericTask ? <option value="json">Export: JSON</option> : null}
-              {isGenericTask ? <option value="jsonl">Export: JSONL</option> : null}
-              {!isGenericTask ? <option value="coco">Export: COCO</option> : null}
-              {!isGenericTask ? <option value="yolo">Export: YOLO</option> : null}
-              {!isGenericTask ? <option value="voc">Export: VOC</option> : null}
-              <option value="csv">Export: CSV</option>
-            </select>
-          </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-            {hasVideoAssets
-              ? "Для видео первый этап стартует сразу после успешной загрузки: выбранные исполнители получают задачи на интервалы. Finalize import нужен позже для image-only импортов или ручной догенерации bbox-задач по уже утвержденным интервалам."
-              : taskType === "image_annotation"
-                ? "Для image annotation нажмите Finalize import после preview, чтобы создать legacy Task-задания по загруженным изображениям."
-                : canUploadMedia
-                  ? "Для изображений нажмите Finalize import после preview, чтобы создать bbox-задачи для выбранных исполнителей."
-                  : "Для этого типа проекта импорт медиа не используется."}
-          </div>
-          {uploadError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{uploadError}</div> : null}
-          {finalizeError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{finalizeError}</div> : null}
-          {lastUploadPreview ? (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-              <div>Processed assets: {lastUploadPreview.assets_processed}</div>
-              <div>Failed assets: {lastUploadPreview.assets_failed}</div>
-              <div>Frames detected: {lastUploadPreview.frames_total}</div>
-              {lastUploadPreview.cleanup ? (
-                <div className="mt-2">
-                  Cleanup: duplicates removed {lastUploadPreview.cleanup.duplicates_removed ?? 0}, invalid frames removed {lastUploadPreview.cleanup.invalid_frames_removed ?? 0}
-                </div>
-              ) : null}
-              {lastUploadPreview.ffmpeg ? (
-                <div className={`mt-2 ${lastUploadPreview.ffmpeg.available ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300"}`}>
-                  ffmpeg: {String(lastUploadPreview.ffmpeg.message || "")}
-                </div>
-              ) : null}
-              {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Errors: {lastUploadPreview.errors.join("; ")}</div> : null}
+            <div className="flex items-center gap-2">
+              <select
+                className="input-field w-auto"
+                value={artifact}
+                onChange={(e) => setArtifact(e.target.value as ProjectExportArtifactName)}
+              >
+                <option value="validated_dataset">Валидированный датасет</option>
+                <option value="consensus_annotations">Консенсусные аннотации</option>
+                <option value="raw_annotations">Сырые аннотации</option>
+                <option value="validation_report">Отчёт о валидации</option>
+              </select>
+              <select
+                className="input-field w-auto"
+                value={exportFormat}
+                onChange={(event) => setExportFormat(event.target.value as ProjectExportFormat)}
+              >
+                {isGenericTask ? <option value="both">JSON + JSONL + CSV</option> : <option value="both">COCO + YOLO + VOC + CSV</option>}
+                {isGenericTask ? <option value="json">JSON</option> : null}
+                {isGenericTask ? <option value="jsonl">JSONL</option> : null}
+                {!isGenericTask ? <option value="coco">COCO</option> : null}
+                {!isGenericTask ? <option value="yolo">YOLO</option> : null}
+                {!isGenericTask ? <option value="voc">VOC</option> : null}
+                <option value="csv">CSV</option>
+              </select>
+              <button className="btn-primary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
+                {exportArchiveMutation.isPending ? "Экспорт..." : "Скачать"}
+              </button>
             </div>
-          ) : null}
-          {archiveError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{archiveError}</div> : null}
+          </div>
+          {!canUploadMedia && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Для этого типа проекта импорт медиа не используется.</div>}
+          {uploadError && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{uploadError}</div>}
+          {finalizeError && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{finalizeError}</div>}
+          {archiveError && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{archiveError}</div>}
         </div>
 
         {/* Настройки */}

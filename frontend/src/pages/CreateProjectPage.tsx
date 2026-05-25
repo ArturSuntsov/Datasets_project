@@ -17,6 +17,29 @@ const WIDGET_TITLES: Record<ProjectWidgetType, string> = {
   comparison: "Сравнение",
 };
 
+// Страховочная карта перевода на случай, если бэкенд вернёт английские названия
+const TASK_TITLES_FALLBACK: Record<string, string> = {
+  video_annotation: "Разметка интервалов видео",
+  video_interval_validation: "Валидация интервалов видео",
+  bbox_annotation: "Bounding box разметка",
+  bbox_validation: "Bounding box валидация",
+  text_annotation: "Текстовая разметка",
+  image_annotation: "Разметка изображений",
+  classification: "Классификация",
+  comparison: "Сравнение",
+};
+
+const TASK_DESCRIPTIONS_FALLBACK: Record<string, string> = {
+  video_annotation: "Исполнители выделяют интервалы на загруженных видео.",
+  video_interval_validation: "Исполнители проверяют интервалы из проекта-источника.",
+  bbox_annotation: "Исполнители рисуют ограничивающие рамки на изображениях или кадрах.",
+  bbox_validation: "Исполнители проверяют готовые рамки из проекта-источника.",
+  text_annotation: "Исполнители вводят произвольный текст.",
+  image_annotation: "Исполнители выбирают метки для загруженных изображений без рисования рамок.",
+  classification: "Исполнители выбирают один класс из схемы меток проекта.",
+  comparison: "Исполнители выбирают между вариантом A и B.",
+};
+
 function parseLabels(raw: string): ProjectLabel[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean).map((name, i) => ({ name, color: LABEL_COLORS[i % LABEL_COLORS.length] }));
 }
@@ -104,6 +127,16 @@ export default function CreateProjectPage() {
     }
   };
 
+  // Получение переведённого названия типа задания
+  const getTaskTitle = (spec: TaskTypeSpec) => {
+    return TASK_TITLES_FALLBACK[spec.value] || spec.title;
+  };
+
+  // Получение переведённого описания типа задания
+  const getTaskDescription = (spec: TaskTypeSpec) => {
+    return TASK_DESCRIPTIONS_FALLBACK[spec.value] || spec.description;
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
@@ -125,8 +158,12 @@ export default function CreateProjectPage() {
                   onClick={() => selectTaskType(spec.value)}
                   className={`rounded-lg border p-4 text-left transition ${active ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950" : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-950"}`}
                 >
-                  <div className="font-semibold text-gray-900 dark:text-white">{spec.title}</div>
-                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{spec.description}</div>
+                  <div className="font-semibold text-gray-900 dark:text-white">
+                    {getTaskTitle(spec)}
+                  </div>
+                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {getTaskDescription(spec)}
+                  </div>
                 </button>
               );
             })}

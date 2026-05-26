@@ -1632,17 +1632,27 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
     if consensus_f1 >= acceptance_threshold and consensus_quality_ok:
         work_item.status = WorkItem.STATUS_COMPLETED
         work_item.review_required = False
-        work_item.review_status = "auto_accepted"
-        work_item.validation_status = WorkItem.VALIDATION_PENDING
-        work_item.validation_comment = ""
-        work_item.validated_by = None
-        work_item.validated_at = None
         work_item.final_annotation = {"boxes": consensus["boxes"]}
         work_item.final_source = "annotator_consensus"
+        work_item.validation_comment = ""
+        if int(work_item.project.assignments_per_task or 1) == 1:
+            # Авто-одобрение при одном исполнителе на кадр
+            work_item.validation_status = WorkItem.VALIDATION_APPROVED
+            work_item.review_status = "auto_accepted"
+            work_item.validated_by = None
+            work_item.validated_at = datetime.utcnow()
+        else:
+            # Несколько исполнителей — в галерее «На проверке», заказчик может одобрить
+            work_item.validation_status = WorkItem.VALIDATION_PENDING
+            work_item.review_status = "auto_accepted"
+            work_item.validated_by = None
+            work_item.validated_at = None
         work_item.workflow_meta = {
             **(work_item.workflow_meta or {}),
             "bbox_consensus": consensus["metrics"],
+            "auto_approved": int(work_item.project.assignments_per_task or 1) == 1,
         }
+        _ensure_customer_review_snapshot(work_item)
         work_item.save()
 
         for annotation in annotations:
@@ -1672,6 +1682,161 @@ def evaluate_work_item(work_item: WorkItem) -> Optional[dict]:
         "state": state,
         "metrics": {"quality_score": consensus_f1, "pair_quality": pair_quality, "pairs": pair_metrics, "consensus": consensus["metrics"]},
         "requeued_assignments": requeued_assignments,
+    }
+
+
+def _work_item_has_submitted_boxes(work_item: WorkItem) -> bool:
+    annotations = WorkAnnotation.objects(
+        work_item=work_item,
+        status__in=[WorkAnnotation.STATUS_SUBMITTED, WorkAnnotation.STATUS_ACCEPTED],
+    )
+    return any(_normalize_boxes(annotation.label_data) for annotation in annotations)
+
+
+def _customer_review_boxes(work_item: WorkItem) -> List[dict]:
+    boxes = _normalize_boxes(work_item.final_annotation if isinstance(work_item.final_annotation, dict) else {})
+    if boxes:
+        return boxes
+    annotation = _latest_submitted_annotation(work_item)
+    if annotation:
+        return _normalize_boxes(annotation.label_data)
+    return []
+
+
+def work_item_visible_in_customer_gallery(work_item: WorkItem) -> bool:
+    return bool(_customer_review_boxes(work_item))
+
+
+def _ensure_customer_review_snapshot(work_item: WorkItem) -> None:
+    """Expose annotator submission to the customer gallery before formal validation/consensus."""
+    boxes = _customer_review_boxes(work_item)
+    if not boxes:
+        return
+    annotation = _latest_submitted_annotation(work_item)
+    work_item.final_annotation = {"boxes": boxes}
+    meta = dict(work_item.workflow_meta or {})
+    meta["customer_gallery_visible"] = True
+    meta["customer_review_pending"] = work_item.validation_status != WorkItem.VALIDATION_APPROVED
+    meta["auto_approved"] = work_item.validation_status == WorkItem.VALIDATION_APPROVED and not meta.get(
+        "customer_review_approved_at"
+    )
+    meta["customer_review_updated_at"] = datetime.utcnow().isoformat()
+    if annotation:
+        meta["customer_review_annotation_id"] = str(annotation.id)
+    work_item.workflow_meta = meta
+    if work_item.validation_status not in {
+        WorkItem.VALIDATION_APPROVED,
+        WorkItem.VALIDATION_DISPUTED,
+        WorkItem.VALIDATION_INSUFFICIENT_ANNOTATORS,
+        WorkItem.VALIDATION_INSUFFICIENT_VALIDATORS,
+    }:
+        work_item.validation_status = WorkItem.VALIDATION_PENDING
+    work_item.save()
+
+
+def iter_customer_gallery_work_items(project: Project) -> List[WorkItem]:
+    items = list(WorkItem.objects(project=project).order_by("-updated_at", "-created_at"))
+    eligible: List[WorkItem] = []
+    for work_item in items:
+        if _work_item_has_submitted_boxes(work_item) and not (work_item.workflow_meta or {}).get("customer_gallery_visible"):
+            _ensure_customer_review_snapshot(work_item)
+        if work_item_visible_in_customer_gallery(work_item):
+            eligible.append(work_item)
+    return eligible
+
+
+def build_customer_gallery_frame_payload(work_item: WorkItem) -> dict:
+    frame = work_item.frame
+    boxes = _customer_review_boxes(work_item)
+    meta = work_item.workflow_meta or {}
+    return {
+        "work_item_id": str(work_item.id),
+        "frame_uri": frame.frame_uri or "",
+        "width": frame.width,
+        "height": frame.height,
+        "boxes": boxes,
+        "frame_number": frame.frame_number,
+        "timestamp_sec": frame.timestamp_sec,
+        "created_at": work_item.created_at.isoformat() if work_item.created_at else None,
+        "updated_at": work_item.updated_at.isoformat() if work_item.updated_at else None,
+        "customer_approved": work_item.validation_status == WorkItem.VALIDATION_APPROVED,
+        "customer_review_pending": work_item.validation_status != WorkItem.VALIDATION_APPROVED,
+        "auto_approved": bool(meta.get("auto_approved")),
+        "submitted_at": meta.get("customer_review_updated_at"),
+    }
+
+
+def list_customer_gallery_frames(project: Project, limit: int, offset: int) -> Tuple[List[dict], int]:
+    eligible = iter_customer_gallery_work_items(project)
+    total = len(eligible)
+    page = eligible[offset : offset + limit]
+    return [build_customer_gallery_frame_payload(item) for item in page], total
+
+
+def approve_frame_for_customer(project: Project, work_item: WorkItem, actor: User | None = None) -> WorkItem:
+    if work_item.project.id != project.id:
+        raise ValueError("Work item does not belong to this project")
+    boxes = _customer_review_boxes(work_item)
+    if not boxes:
+        raise ValueError("No submitted annotation to approve")
+    now = datetime.utcnow()
+    work_item.final_annotation = {"boxes": boxes}
+    work_item.status = WorkItem.STATUS_COMPLETED
+    work_item.validation_status = WorkItem.VALIDATION_APPROVED
+    work_item.validated_by = actor
+    work_item.validated_at = now
+    if not (work_item.validation_comment or "").strip():
+        work_item.validation_comment = "customer_approved"
+    if not (work_item.final_source or "").strip():
+        work_item.final_source = "customer_approved"
+    work_item.review_required = False
+    work_item.review_status = "customer_accepted"
+    meta = dict(work_item.workflow_meta or {})
+    meta["customer_gallery_visible"] = True
+    meta["customer_review_pending"] = False
+    meta["auto_approved"] = False
+    meta["customer_review_approved_at"] = now.isoformat()
+    work_item.workflow_meta = meta
+    work_item.save()
+    return work_item
+
+
+def _latest_submitted_annotation(work_item: WorkItem) -> WorkAnnotation | None:
+    annotation = (
+        WorkAnnotation.objects(
+            work_item=work_item,
+            status__in=[WorkAnnotation.STATUS_SUBMITTED, WorkAnnotation.STATUS_ACCEPTED],
+            is_final=True,
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    if annotation:
+        return annotation
+    return (
+        WorkAnnotation.objects(
+            work_item=work_item,
+            status__in=[WorkAnnotation.STATUS_SUBMITTED, WorkAnnotation.STATUS_ACCEPTED],
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+
+
+def approve_pending_frames_for_customer(project: Project, actor: User | None = None) -> dict:
+    """Approve every frame visible in the customer gallery that is still awaiting customer sign-off."""
+    approved = 0
+    for work_item in iter_customer_gallery_work_items(project):
+        if work_item.validation_status == WorkItem.VALIDATION_APPROVED:
+            continue
+        approve_frame_for_customer(project, work_item, actor=actor)
+        approved += 1
+    return {
+        "updated": approved,
+        "evaluated": 0,
+        "accepted_from_eval": 0,
+        "force_published": approved,
+        "total_published": approved,
     }
 
 
@@ -2525,6 +2690,9 @@ def save_assignment_annotation(assignment: Assignment, label_data: dict, comment
     annotation.status = WorkAnnotation.STATUS_SUBMITTED if is_final else WorkAnnotation.STATUS_DRAFT
     annotation.save()
 
+    if is_final:
+        _ensure_customer_review_snapshot(assignment.work_item)
+
     evaluation = evaluate_work_item(assignment.work_item) if is_final else None
     if is_final and evaluation and evaluation.get("state") == "accepted":
         settings = workflow_runtime_settings(assignment.project)
@@ -3028,6 +3196,13 @@ def project_overview(project: Project) -> dict:
             "in_review": sum(1 for item in work_items if item.status == WorkItem.STATUS_IN_REVIEW),
             "completed": sum(1 for item in work_items if item.status == WorkItem.STATUS_COMPLETED),
             "validation_pending": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_PENDING),
+            "publishable_pending": sum(
+                1
+                for item in work_items
+                if work_item_visible_in_customer_gallery(item)
+                and item.validation_status != WorkItem.VALIDATION_APPROVED
+            ),
+            "customer_gallery_total": sum(1 for item in work_items if work_item_visible_in_customer_gallery(item)),
             "validation_approved": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_APPROVED),
             "validation_needs_changes": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_NEEDS_CHANGES),
             "validation_disputed": sum(1 for item in work_items if item.validation_status == WorkItem.VALIDATION_DISPUTED),

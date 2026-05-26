@@ -48,6 +48,64 @@ from .security import log_security_event
 from .upload import absolute_media_path, image_dimensions
 from .video_qc import build_video_qc_payload, interpolate_boxes
 
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = None  # type: ignore
+    ImageDraw = None
+    ImageFont = None
+
+
+def _render_annotations_on_image(image_path: str | Path, boxes: list[dict], label_colors: dict[str, tuple[int, int, int]] | None = None) -> bytes:
+    """Draw bounding boxes on an image and return the rendered JPEG bytes."""
+    if Image is None:
+        with open(image_path, "rb") as f:
+            return f.read()
+    img = Image.open(str(image_path)).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    if label_colors is None:
+        label_colors = {}
+    palette = [
+        (0, 255, 0),    # green
+        (0, 0, 255),    # blue
+        (255, 0, 0),    # red
+        (255, 255, 0),  # yellow
+        (255, 0, 255),  # magenta
+        (0, 255, 255),  # cyan
+        (128, 0, 0),
+        (0, 128, 0),
+        (0, 0, 128),
+        (128, 128, 0),
+    ]
+    font = None
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+    except (OSError, IOError):
+        try:
+            font = ImageFont.load_default()
+        except Exception:
+            pass
+    for box in boxes:
+        label = str(box.get("label") or "object")
+        if label not in label_colors:
+            label_colors[label] = palette[len(label_colors) % len(palette)]
+        color = label_colors[label]
+        x = float(box.get("x", 0))
+        y = float(box.get("y", 0))
+        w = float(box.get("width", 0))
+        h = float(box.get("height", 0))
+        draw.rectangle([x, y, x + w, y + h], outline=color, width=3)
+        if font:
+            bbox_text = draw.textbbox((x, y), label, font=font)
+            text_w = bbox_text[2] - bbox_text[0]
+            text_h = bbox_text[3] - bbox_text[1]
+            draw.rectangle([x, y - text_h - 4, x + text_w + 4, y], fill=color)
+            draw.text((x + 2, y - text_h - 2), label, fill="white", font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=92)
+    return buf.getvalue()
+
 DEFAULT_TASK_BATCH_SIZE = 10
 DEFAULT_MIN_SEQUENCE_SIZE = 3
 DEFAULT_INTERVAL_VALIDATORS_PER_ITEM = 3
@@ -3598,7 +3656,7 @@ def _csv_rows_to_text(rows: List[dict]) -> str:
     return stream.getvalue()
 
 
-def build_dataset_export_archive(project: Project, export_format: str = "both") -> tuple[str, bytes]:
+def build_dataset_export_archive(project: Project, export_format: str = "both", include_images: bool = False) -> tuple[str, bytes]:
     payload = build_dataset_export(project, export_format=export_format)
     archive_stream = io.BytesIO()
     with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
@@ -3630,17 +3688,100 @@ def build_dataset_export_archive(project: Project, export_format: str = "both") 
             bundle.writestr("annotations.jsonl", payload.get("jsonl", ""))
         if "csv" in payload:
             bundle.writestr("annotations/csv/annotations.csv", _csv_rows_to_text(payload["csv"]))
-        for item in payload.get("manifest", []):
-            frame_uri = item.get("frame_uri")
-            if not frame_uri:
+        if include_images:
+            label_colors: dict[str, tuple[int, int, int]] | None = {} if payload.get("manifest") else None
+            manifest_lookup = {str(item["work_item_id"]): item for item in payload.get("manifest", [])}
+            work_items_by_id = {str(wi.id): wi for wi in work_items}
+            for record in export_records:
+                work_item = record["work_item"]
+                boxes = _normalize_boxes(work_item.final_annotation)
+                frame_uri = work_item.frame.frame_uri if work_item.frame else None
+                if not frame_uri:
+                    continue
+                image_path_key = record["image_path"]
+                try:
+                    path = absolute_media_path(frame_uri)
+                    image_bytes = _render_annotations_on_image(path, boxes, label_colors)
+                    bundle.writestr(image_path_key, image_bytes)
+                except Exception:
+                    try:
+                        path = absolute_media_path(frame_uri)
+                        with open(path, "rb") as source:
+                            bundle.writestr(image_path_key, source.read())
+                    except Exception:
+                        continue
+    archive_name = f"project_{project.id}_{export_format}.zip"
+    return archive_name, archive_stream.getvalue()
+
+
+def build_images_export_archive(project: Project) -> tuple[str, bytes]:
+    """Build a ZIP archive containing only source images (frames) without any annotations."""
+    archive_stream = io.BytesIO()
+    with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        work_items = list(WorkItem.objects(project=project))
+        added_paths: set[str] = set()
+        for work_item in work_items:
+            frame = work_item.frame
+            if not frame or not frame.frame_uri:
                 continue
             try:
-                path = absolute_media_path(frame_uri)
-                with open(path, "rb") as source:
-                    bundle.writestr(item.get("image_path") or f"images/train/{path.name}", source.read())
+                path = absolute_media_path(frame.frame_uri)
+                if str(path) in added_paths:
+                    continue
+                added_paths.add(str(path))
+                bundle.writestr(f"images/{path.name}", path.read_bytes())
             except Exception:
                 continue
-    archive_name = f"project_{project.id}_{export_format}.zip"
+        # Also include frames from golden frames
+        for golden in GoldenFrame.objects(project=project):
+            frame = golden.frame
+            if not frame or not frame.frame_uri:
+                continue
+            try:
+                path = absolute_media_path(frame.frame_uri)
+                if str(path) in added_paths:
+                    continue
+                added_paths.add(str(path))
+                bundle.writestr(f"images/{path.name}", path.read_bytes())
+            except Exception:
+                continue
+    archive_name = f"project_{project.id}_images.zip"
+    return archive_name, archive_stream.getvalue()
+
+
+def build_images_export_archive_with_annotations(project: Project) -> tuple[str, bytes]:
+    """
+    Build a ZIP archive containing rendered images with annotations drawn on them.
+    Only exportable (completed + validation_approved) work items are included.
+    No annotation files are included — only rendered images.
+    """
+    archive_stream = io.BytesIO()
+    label_colors: dict[str, tuple[int, int, int]] = {}
+    with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        work_items = list(
+            WorkItem.objects(
+                project=project,
+                status=WorkItem.STATUS_COMPLETED,
+                validation_status=WorkItem.VALIDATION_APPROVED,
+            )
+        )
+        for work_item in work_items:
+            frame = work_item.frame
+            if not frame or not frame.frame_uri:
+                continue
+            boxes = _normalize_boxes(work_item.final_annotation)
+            try:
+                path = absolute_media_path(frame.frame_uri)
+                image_bytes = _render_annotations_on_image(path, boxes, label_colors)
+                bundle.writestr(f"images/{path.name}", image_bytes)
+            except Exception:
+                try:
+                    path = absolute_media_path(frame.frame_uri)
+                    with open(path, "rb") as source:
+                        bundle.writestr(f"images/{path.name}", source.read())
+                except Exception:
+                    continue
+    archive_name = f"project_{project.id}_images.zip"
     return archive_name, archive_stream.getvalue()
 
 

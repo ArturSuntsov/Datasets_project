@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -147,6 +147,14 @@ function DawidSkeneQuality({ projectId }: { projectId: string }) {
   );
 }
 
+/** Formats for annotation export: label used in UI and the query param value. */
+const ANNOTATION_FORMATS = [
+  { label: "PASCAL VOC", param: "voc" },
+  { label: "COCO", param: "coco" },
+  { label: "YOLO", param: "yolo" },
+  { label: "TFRecord", param: "tfrecord" },
+] as const;
+
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -159,12 +167,14 @@ export default function ProjectDetailPage() {
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUploadError, setInstructionUploadError] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
-  const [exportFormat, setExportFormat] = useState<"coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both">("both");
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [genericTasksInput, setGenericTasksInput] = useState("");
   const [genericTasksFile, setGenericTasksFile] = useState<File | null>(null);
   const [genericTasksError, setGenericTasksError] = useState<string | null>(null);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState<string | null>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
@@ -232,25 +242,25 @@ export default function ProjectDetailPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: async () => workflowAPI.export(projectId!, exportFormat),
-    onSuccess: (payload) => {
-      setExportPayload(JSON.stringify(payload, null, 2));
+    mutationFn: async ({ format }: { format: string }) => {
+      const blob = await workflowAPI.exportArchive(projectId!, format as any);
+      return { format, blob };
     },
-  });
-
-  const exportArchiveMutation = useMutation({
-    mutationFn: async () => workflowAPI.exportArchive(projectId!, exportFormat),
-    onSuccess: (blob) => {
+    onSuccess: ({ format, blob }) => {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `project-${projectId}-${exportFormat}.zip`;
+      // Определяем расширение файла в зависимости от формата
+      const extension = format === "coco" ? "json" : format === "tfrecord" ? "tfrecord" : "zip";
+      anchor.download = `project-${projectId}-${format}.${extension}`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setArchiveError(null);
+      setExportLoading(null);
     },
     onError: (err: any) => {
-      setArchiveError(err?.response?.data?.detail || err?.message || "Archive export failed");
+      const msg = err?.response?.data?.detail || err?.message || "Export failed";
+      setArchiveError(msg);
+      setExportLoading(null);
     },
   });
 
@@ -373,6 +383,7 @@ export default function ProjectDetailPage() {
   const overviewAny = overview as any;
   const bboxValidationAssigned = Number(overviewAny?.bbox_validation?.assigned || 0);
   const canDeleteProject = user?.role === "admin" || (user?.role === "customer" && projectQuery.data?.owner_id === user.id);
+  const isCustomer = user?.role === "customer";
   const sourceSync = overview?.source_sync;
   const readinessGates = [
     { label: "Импорт готов", ready: Number(overview?.imports?.ready || 0) > 0 || Number(overview?.imports?.finalized || 0) > 0 },
@@ -386,6 +397,20 @@ export default function ProjectDetailPage() {
   const completion = useMemo(() => {
     return totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0;
   }, [completedWorkItems, totalWorkItems]);
+
+  /** Handle choosing an export format from the dropdown */
+  const handleExport = (format: string) => {
+    setExportDropdownOpen(false);
+    setExportLoading(format);
+    exportMutation.mutate({ format });
+  };
+
+  /** Close dropdown on outside click */
+  const handleOutsideClick = (e: React.MouseEvent) => {
+    if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+      setExportDropdownOpen(false);
+    }
+  };
 
   if (projectQuery.isLoading) {
     return <LoadingSpinner size="lg" />;
@@ -443,12 +468,53 @@ export default function ProjectDetailPage() {
           ) : null}
           {!isGenericTask ? (
             <>
-              <button className="btn-secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
-                {exportMutation.isPending ? "Exporting..." : exportReady ? "Export dataset" : "Export report"}
-              </button>
-              <button className="btn-secondary" onClick={() => exportArchiveMutation.mutate()} disabled={exportArchiveMutation.isPending}>
-                {exportArchiveMutation.isPending ? "Preparing zip..." : exportReady ? "Download zip" : "Download report zip"}
-              </button>
+              {/* Export button — visible only for customer role */}
+              {isCustomer ? (
+                <div className="relative" ref={exportDropdownRef} onClick={handleOutsideClick}>
+                  <button
+                    className="btn-primary"
+                    onClick={() => setExportDropdownOpen((prev) => !prev)}
+                    disabled={!!exportLoading || !exportReady}
+                    title={!exportReady ? "Нет данных для экспорта" : ""}
+                  >
+                    {exportLoading ? (
+                      <span className="flex items-center gap-2">
+                        <LoadingSpinner size="sm" />
+                        {exportLoading === "images" ? "Загрузка..." : "Экспорт..."}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        Экспорт <span className="text-xs">{exportDropdownOpen ? "▲" : "▼"}</span>
+                      </span>
+                    )}
+                  </button>
+                  {exportDropdownOpen && (
+                    <div className="absolute right-0 z-50 mt-2 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                      <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Форматы аннотаций
+                      </div>
+                      {ANNOTATION_FORMATS.map((item) => (
+                        <button
+                          key={item.param}
+                          className="flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                          onClick={() => handleExport(item.param)}
+                          disabled={exportLoading === item.param}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                      <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+                      <button
+                        className="flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                        onClick={() => handleExport("images")}
+                        disabled={exportLoading === "images"}
+                      >
+                        Изображения
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </>
           ) : null}
           <button className="btn-secondary" onClick={() => syncWorkflowMutation.mutate()} disabled={syncWorkflowMutation.isPending}>
@@ -714,6 +780,7 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        {/* Import block — чисто импорт, без экспорта */}
         <div className="card space-y-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{taskCopy.importTitle}</h2>
@@ -746,19 +813,6 @@ export default function ProjectDetailPage() {
             <button className="btn-secondary" type="button" onClick={() => finalizeMutation.mutate()} disabled={!canUploadMedia || !readyImportId || finalizeMutation.isPending}>
               {finalizeMutation.isPending ? "Finalizing..." : "Finalize import"}
             </button>
-            <select
-              className="input-field w-auto"
-              value={exportFormat}
-              onChange={(event) => setExportFormat(event.target.value as "coco" | "yolo" | "voc" | "csv" | "json" | "jsonl" | "both")}
-            >
-              {isGenericTask ? <option value="both">Export: JSON + JSONL + CSV</option> : <option value="both">Export: COCO + YOLO + VOC + CSV</option>}
-              {isGenericTask ? <option value="json">Export: JSON</option> : null}
-              {isGenericTask ? <option value="jsonl">Export: JSONL</option> : null}
-              {!isGenericTask ? <option value="coco">Export: COCO</option> : null}
-              {!isGenericTask ? <option value="yolo">Export: YOLO</option> : null}
-              {!isGenericTask ? <option value="voc">Export: VOC</option> : null}
-              <option value="csv">Export: CSV</option>
-            </select>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
             {hasVideoAssets

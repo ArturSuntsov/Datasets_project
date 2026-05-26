@@ -190,6 +190,13 @@ export const projectsAPI = {
   async delete(id: string): Promise<void> {
     await api.delete(`/api/projects/${id}/`);
   },
+  async exportImages(projectId: string): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/images/`, {
+      params: { download: "1" },
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
   async uploadInstructions(projectId: string, file: File): Promise<Pick<Project, "instructions_file_uri" | "instructions_file_name" | "instructions_version" | "instructions_updated_at">> {
     const formData = new FormData();
     formData.append("file", file);
@@ -269,8 +276,8 @@ export const workflowAPI = {
     const res = await api.get<ProjectExportPayload>(`/api/cv/projects/${projectId}/export/`, { params: { format } });
     return res.data;
   },
-  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "tfrecord" | "csv" | "json" | "jsonl" | "both" = "both"): Promise<Blob> {
-    const res = await api.get(`/api/cv/projects/${projectId}/export/`, {
+  async exportArchive(projectId: string, format: "coco" | "yolo" | "voc" | "tfrecord" | "csv" | "json" | "jsonl" | "both" | "images" = "both"): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/`, {
       params: { format, download: "1" },
       responseType: "blob",
     });

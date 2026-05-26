@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { resolveMediaUrl } from "../utils/media";
 
 interface Box {
     x: number;
@@ -16,71 +17,77 @@ interface AnnotatedImageViewerProps {
     onClose: () => void;
 }
 
-export function AnnotatedImageViewer({ imageUrl, boxes, width = 800, height = 600, onClose }: AnnotatedImageViewerProps) {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [img, setImg] = useState<HTMLImageElement | null>(null);
-    const [loading, setLoading] = useState(true);
+export function AnnotatedImageViewer({
+    imageUrl,
+    boxes,
+    width = 1,
+    height = 1,
+    onClose,
+}: AnnotatedImageViewerProps) {
+    const [loadError, setLoadError] = useState(false);
+    const mediaUrl = resolveMediaUrl(imageUrl);
+    const frameWidth = Math.max(Number(width || 1), 1);
+    const frameHeight = Math.max(Number(height || 1), 1);
 
-    useEffect(() => {
-        const image = new Image();
-        image.crossOrigin = "anonymous";
-        image.onload = () => {
-            setImg(image);
-            setLoading(false);
-        };
-        image.onerror = () => setLoading(false);
-        image.src = imageUrl;
-    }, [imageUrl]);
-
-    useEffect(() => {
-        if (!img || !canvasRef.current) return;
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        const scale = Math.min(width / img.width, height / img.height);
-        const drawWidth = img.width * scale;
-        const drawHeight = img.height * scale;
-        const offsetX = (width - drawWidth) / 2;
-        const offsetY = (height - drawHeight) / 2;
-
-        canvas.width = width;
-        canvas.height = height;
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
-
-        for (const box of boxes) {
-            const x = offsetX + box.x * scale;
-            const y = offsetY + box.y * scale;
-            const w = box.width * scale;
-            const h = box.height * scale;
-            ctx.strokeStyle = "#ef4444";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = "#ef4444";
-            ctx.font = "14px sans-serif";
-            ctx.fillText(box.label, x + 2, y - 2);
-        }
-    }, [img, boxes, width, height]);
-
-    if (loading) {
+    if (loadError) {
         return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-                <div className="text-white">��������...</div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={onClose}>
+                <div
+                    className="relative rounded-lg bg-white p-6 text-center dark:bg-gray-800"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <p className="text-sm text-gray-700 dark:text-gray-200">Не удалось загрузить изображение</p>
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 break-all">{mediaUrl}</p>
+                    <button type="button" className="btn-secondary mt-4" onClick={onClose}>
+                        Закрыть
+                    </button>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={onClose}>
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl p-2" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+            <div
+                className="relative max-h-full max-w-full overflow-auto rounded-lg bg-neutral-950 p-2 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+            >
                 <button
-                    className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 bg-white/50 rounded-full w-8 h-8"
+                    type="button"
+                    className="absolute top-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-lg text-white hover:bg-black/80"
                     onClick={onClose}
+                    aria-label="Закрыть"
                 >
-                    ?
+                    ×
                 </button>
-                <canvas ref={canvasRef} style={{ maxWidth: "90vw", maxHeight: "90vh" }} />
+                <div className="relative inline-block">
+                    <img
+                        src={mediaUrl}
+                        alt="Размеченный кадр"
+                        className="block max-h-[85vh] max-w-[min(90vw,1400px)] h-auto w-auto select-none"
+                        draggable={false}
+                        onError={() => setLoadError(true)}
+                    />
+                    {boxes.map((box, index) => (
+                        <div
+                            key={index}
+                            className="absolute border-2 border-red-500 pointer-events-none"
+                            style={{
+                                left: `${(Number(box.x || 0) / frameWidth) * 100}%`,
+                                top: `${(Number(box.y || 0) / frameHeight) * 100}%`,
+                                width: `${(Number(box.width || 0) / frameWidth) * 100}%`,
+                                height: `${(Number(box.height || 0) / frameHeight) * 100}%`,
+                                boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
+                            }}
+                        >
+                            {box.label ? (
+                                <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-red-600/90 px-2 py-0.5 text-xs text-white">
+                                    {box.label}
+                                </span>
+                            ) : null}
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );

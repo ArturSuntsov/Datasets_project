@@ -20,6 +20,11 @@ from ..labeling.models import Annotation, LabelingSession
 from ..labeling.serializers import AnnotationSerializer
 from ..users.models import User
 from ..users.views import authenticate_from_jwt
+from apps.cv_annotation.services.workflow import (
+    approve_frame_for_customer,
+    approve_pending_frames_for_customer,
+    list_customer_gallery_frames,
+)
 from .models import Project, ProjectMembership, Task
 from .serializers import ProjectSerializer, TaskSerializer
 from .services.generic_tasks import (
@@ -92,6 +97,14 @@ class JWTRequiredMixin:
         if not user:
             return None, Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
         return user, None
+
+
+def _absolute_media_url(request: HttpRequest, uri: str) -> str:
+    if not uri:
+        return uri
+    if uri.startswith(("http://", "https://")):
+        return uri
+    return request.build_absolute_uri(uri)
 
 
 class ProjectViewSet(JWTRequiredMixin, ViewSet):
@@ -569,6 +582,46 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
             'total_participants': len(leaderboard),
         })
 
+    @action(detail=True, methods=["post"], url_path="approve-all-pending")
+    def approve_all_pending(self, request, pk=None):
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        if not ObjectId.is_valid(pk):
+            return Response({"detail": "Invalid project id"}, status=400)
+        project = self.get_queryset_for_user(user).filter(id=ObjectId(pk)).first()
+        if not project:
+            return Response({"detail": "Project not found"}, status=404)
+        if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
+            return Response({"detail": "Forbidden"}, status=403)
+
+        result = approve_pending_frames_for_customer(project, actor=user)
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path=r"approve-frame/(?P<work_item_id>[^/.]+)")
+    def approve_frame(self, request, pk=None, work_item_id=None):
+        user, resp = self._require_user(request)
+        if resp:
+            return resp
+        if not ObjectId.is_valid(pk) or not ObjectId.is_valid(work_item_id):
+            return Response({"detail": "Invalid id"}, status=status.HTTP_400_BAD_REQUEST)
+        project = self.get_queryset_for_user(user).filter(id=ObjectId(pk)).first()
+        if not project:
+            return Response({"detail": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
+        if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        from apps.cv_annotation.models import WorkItem
+
+        work_item = WorkItem.objects(project=project, id=ObjectId(work_item_id)).first()
+        if not work_item:
+            return Response({"detail": "Frame not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            approve_frame_for_customer(project, work_item, actor=user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"work_item_id": str(work_item.id), "customer_approved": True}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["get"], url_path="annotated-frames")
     def annotated_frames(self, request, pk=None):
         user, resp = self._require_user(request)
@@ -582,12 +635,6 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
         if user.role != User.ROLE_ADMIN and str(project.owner.id) != str(user.id):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = WorkItem.objects(
-            project=project,
-            status=WorkItem.STATUS_COMPLETED,
-            validation_status=WorkItem.VALIDATION_APPROVED
-        ).order_by("-created_at")
-
         try:
             limit = int(request.query_params.get("limit", 20))
         except ValueError:
@@ -598,23 +645,16 @@ class ProjectViewSet(JWTRequiredMixin, ViewSet):
         except ValueError:
             offset = 0
 
-        total = qs.count()
-        items = qs.skip(offset).limit(limit)
-
+        items, total = list_customer_gallery_frames(project, limit=limit, offset=offset)
         result = []
-        for wi in items:
-            frame = wi.frame
-            boxes = wi.final_annotation.get("boxes", []) if isinstance(wi.final_annotation, dict) else []
-            result.append({
-                "work_item_id": str(wi.id),
-                "frame_url": frame.frame_uri,
-                "width": frame.width,
-                "height": frame.height,
-                "boxes": boxes,
-                "frame_number": frame.frame_number,
-                "timestamp_sec": frame.timestamp_sec,
-                "created_at": wi.created_at.isoformat() if wi.created_at else None,
-            })
+        for item in items:
+            frame_uri = item.pop("frame_uri", "")
+            item["frame_url"] = (
+                frame_uri
+                if str(frame_uri).startswith("/media/")
+                else _absolute_media_url(request, frame_uri)
+            )
+            result.append(item)
 
         return Response({
             "items": result,

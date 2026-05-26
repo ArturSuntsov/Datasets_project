@@ -167,6 +167,31 @@ export const participantsAPI = {
 };
 
 export const projectsAPI = {
+    async approveAllPending(projectId: string): Promise<{
+        updated: number;
+        evaluated: number;
+        accepted_from_eval: number;
+        force_published: number;
+        total_published: number;
+    }> {
+        const res = await api.post<{
+            updated: number;
+            evaluated: number;
+            accepted_from_eval: number;
+            force_published: number;
+            total_published: number;
+        }>(`/api/projects/${projectId}/approve-all-pending/`, {});
+        return res.data;
+    },
+
+    async approveFrame(projectId: string, workItemId: string): Promise<{ work_item_id: string; customer_approved: boolean }> {
+        const res = await api.post<{ work_item_id: string; customer_approved: boolean }>(
+            `/api/projects/${projectId}/approve-frame/${workItemId}/`,
+            {}
+        );
+        return res.data;
+    },
+
     async getAnnotatedFrames(projectId: string, params?: { limit?: number; offset?: number }): Promise<{
         items: Array<{
             work_item_id: string;
@@ -177,6 +202,11 @@ export const projectsAPI = {
             frame_number: number;
             timestamp_sec: number;
             created_at: string;
+            updated_at?: string;
+            customer_approved: boolean;
+            customer_review_pending: boolean;
+            auto_approved?: boolean;
+            submitted_at?: string;
         }>;
         total: number;
         limit: number;

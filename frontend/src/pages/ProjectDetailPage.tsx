@@ -258,6 +258,26 @@ export default function ProjectDetailPage() {
         },
     });
 
+    const approvePendingMutation = useMutation({
+        mutationFn: async () => {
+            if (!projectId) throw new Error("Project id missing");
+            if (!confirm("Одобрить все завершённые кадры, ожидающие валидации? Они появятся во вкладке «Размеченные кадры».")) {
+                throw new Error("cancelled");
+            }
+            return projectsAPI.approveAllPending(projectId);
+        },
+        onSuccess: async (data) => {
+            await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+            await queryClient.invalidateQueries({ queryKey: ["annotated-frames", projectId] });
+            alert(`Одобрено кадров: ${data.updated}`);
+        },
+        onError: (err: unknown) => {
+            if (err instanceof Error && err.message === "cancelled") return;
+            const detail = isAxiosError(err) ? err.response?.data?.detail : undefined;
+            alert(`Ошибка: ${detail || (err instanceof Error ? err.message : "Неизвестная ошибка")}`);
+        },
+    });
+
     const syncWorkflowMutation = useMutation({
         mutationFn: async () => workflowAPI.sync(projectId!),
         onSuccess: async () => {
@@ -364,6 +384,10 @@ export default function ProjectDetailPage() {
     const completedWorkItems = Number(overview?.work_items?.completed || 0);
     const approvedExportItems = Number((overview?.work_items as any)?.validation_approved || 0);
     const validationPendingItems = Number((overview?.work_items as any)?.validation_pending || 0);
+    const publishablePendingItems = Number(
+        (overview?.work_items as any)?.publishable_pending ?? validationPendingItems
+    );
+    const customerGalleryTotal = Number((overview?.work_items as any)?.customer_gallery_total ?? 0);
     const validationDisputedItems = Number((overview?.work_items as any)?.validation_disputed || 0);
     const insufficientAnnotatorItems = Number((overview?.work_items as any)?.insufficient_annotators || 0);
     const insufficientValidatorItems = Number((overview?.work_items as any)?.insufficient_validators || 0);
@@ -969,10 +993,36 @@ export default function ProjectDetailPage() {
                     {activeTab === "overview" && projectOverviewContent}
                     {activeTab === "annotated" && (
                         <div className="card">
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                                🖼️ Размеченные кадры (прошедшие валидацию)
-                            </h2>
-                            <AnnotatedFramesGallery projectId={projectId!} />
+                            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                                        Размеченные кадры
+                                    </h2>
+                                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                                        Кадры появляются сразу после отправки разметки исполнителем. Всего:{" "}
+                                        {customerGalleryTotal || "—"}
+                                        {publishablePendingItems > 0 ? ` · ждут одобрения: ${publishablePendingItems}` : ""}
+                                        {approvedExportItems > 0 ? ` · одобрено: ${approvedExportItems}` : ""}
+                                    </p>
+                                </div>
+                                {publishablePendingItems > 0 ? (
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={() => approvePendingMutation.mutate()}
+                                        disabled={approvePendingMutation.isPending}
+                                    >
+                                        {approvePendingMutation.isPending ? "Одобряем..." : "Одобрить ожидающие"}
+                                    </button>
+                                ) : null}
+                            </div>
+                            <AnnotatedFramesGallery
+                                projectId={projectId!}
+                                isActive={activeTab === "annotated"}
+                                pendingValidationCount={publishablePendingItems}
+                                onApprovePending={() => approvePendingMutation.mutate()}
+                                isApproving={approvePendingMutation.isPending}
+                            />
                         </div>
                     )}
                 </>

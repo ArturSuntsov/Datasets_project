@@ -6,7 +6,7 @@ from django.http.response import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
 
-from .export_standards import collect_project_export_bundle, export_tfrecord
+from .export_standards import collect_project_export_bundle, export_tfrecord, export_voc_zip, export_coco_json, export_yolo_zip
 from .models import Project
 from .services.generic_tasks import (
     build_generic_project_export,
@@ -59,10 +59,49 @@ def _log_export(project, user, export_format: str, entrypoint: str, archive: boo
         logger.warning("Failed to log export event for project %s: %s", project.id, exc)
 
 
+def _check_export_ready(project: Project) -> bool:
+    """Check if project has at least one labeled item ready for export."""
+    from apps.cv_annotation.models import WorkItem
+    return WorkItem.objects(
+        project=project,
+        status=WorkItem.STATUS_COMPLETED,
+        validation_status=WorkItem.VALIDATION_APPROVED,
+    ).count() > 0
+
+
 def _zip_response(filename: str, payload: bytes) -> HttpResponse:
     response = HttpResponse(payload, content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+def export_project_images(project_id, user, request):
+    """
+    Export rendered images (with annotations drawn on them) as a ZIP archive.
+    Only annotated images are exported, without any annotation files.
+    """
+    try:
+        logger.info("Export images called for project %s", project_id)
+        project, error_response = _project_for_export(project_id, user)
+        if error_response is not None:
+            return error_response
+        if not _check_export_ready(project):
+            return Response(
+                {"detail": "No labeled data to export"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from apps.cv_annotation.services.workflow import build_images_export_archive_with_annotations
+        archive_name, archive_bytes = build_images_export_archive_with_annotations(project)
+        _log_export(project, user, "images", "images", archive=True, filename=archive_name)
+        return _zip_response(archive_name, archive_bytes)
+    except Exception as exc:
+        import traceback
+        logger.error("Unexpected error in export_images: %s", str(exc))
+        logger.error(traceback.format_exc())
+        return Response(
+            {"detail": "Internal server error: %s" % str(exc)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 def export_project_dataset(project_id, user, request, entrypoint: str = "projects"):
@@ -136,8 +175,38 @@ def export_project_dataset(project_id, user, request, entrypoint: str = "project
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Проверка наличия размеченных данных
+        if not _check_export_ready(project):
+            return Response(
+                {"detail": "No labeled data to export"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Собираем данные для экспорта
+        bundle = collect_project_export_bundle(project)
+
+        if export_format == "voc":
+            path, filename, warnings = export_voc_zip(bundle)
+            response = FileResponse(open(path, "rb"), content_type="application/zip", as_attachment=True, filename=filename)
+            response["X-Export-Warnings"] = str(int(warnings))
+            _log_export(project, user, export_format, entrypoint, archive=True, filename=filename, warnings=warnings)
+            return response
+
+        if export_format == "coco":
+            json_str, filename = export_coco_json(bundle)
+            response = HttpResponse(json_str, content_type="application/json")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            _log_export(project, user, export_format, entrypoint, archive=False, filename=filename)
+            return response
+
+        if export_format == "yolo":
+            path, filename, warnings = export_yolo_zip(bundle)
+            response = FileResponse(open(path, "rb"), content_type="application/zip", as_attachment=True, filename=filename)
+            response["X-Export-Warnings"] = str(int(warnings))
+            _log_export(project, user, export_format, entrypoint, archive=True, filename=filename, warnings=warnings)
+            return response
+
         if export_format == "tfrecord":
-            bundle = collect_project_export_bundle(project)
             path, filename, warnings = export_tfrecord(bundle)
             response = FileResponse(open(path, "rb"), content_type="application/octet-stream", as_attachment=True, filename=filename)
             response["X-Export-Warnings"] = str(int(warnings))

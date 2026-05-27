@@ -148,7 +148,27 @@ def project_export_endpoint(request: HttpRequest, project_id: str):
         user = authenticate_from_jwt(request)
     except PermissionError:
         return JsonResponse({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+    # Проверка роли customer
+    if getattr(user, "role", "") not in ("customer", "admin"):
+        return JsonResponse({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+    from apps.projects.export_utils import _request_param, export_project_dataset, export_project_images
+    export_format = (_request_param(request, "format") or "").strip().lower()
+    if export_format == "images":
+        return export_project_images(project_id, user, request)
     return export_project_dataset(project_id, user, request, entrypoint="function")
+
+
+def project_export_images_endpoint(request: HttpRequest, project_id: str):
+    if request.method != "GET":
+        return JsonResponse({"detail": "Method not allowed"}, status=405)
+    try:
+        user = authenticate_from_jwt(request)
+    except PermissionError:
+        return JsonResponse({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+    if getattr(user, "role", "") not in ("customer", "admin"):
+        return JsonResponse({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+    from apps.projects.export_utils import export_project_images
+    return export_project_images(project_id, user, request)
 
 
 class ProjectImportView(AuthenticatedAPIView):
@@ -176,6 +196,11 @@ class ProjectImportView(AuthenticatedAPIView):
             payload = save_project_file(request.FILES["file"], str(project.id), str(import_session.id))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except OSError:
+            return Response(
+                {"detail": "Upload storage is not writable. Check MEDIA_ROOT permissions."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         asset = ImportAsset(
             import_session=import_session,
             project=project,

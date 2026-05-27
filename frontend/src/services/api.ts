@@ -17,6 +17,7 @@ import {
   GoldenSourceFrame,
   InstructionBundle,
   LoginRequest,
+  NotificationsResponse,
   Participant,
   PaymentRequestBody,
   Project,
@@ -207,6 +208,13 @@ export const projectsAPI = {
   },
   async delete(id: string): Promise<void> {
     await api.delete(`/api/projects/${id}/`);
+  },
+  async exportImages(projectId: string): Promise<Blob> {
+    const res = await api.get(`/api/projects/${projectId}/export/images/`, {
+      params: { download: "1" },
+      responseType: "blob",
+    });
+    return res.data as Blob;
   },
   async uploadInstructions(projectId: string, file: File): Promise<Pick<Project, "instructions_file_uri" | "instructions_file_name" | "instructions_version" | "instructions_updated_at">> {
     const formData = new FormData();
@@ -676,6 +684,29 @@ export const dawidSkeneAPI = {
     }>;
   }> {
     const res = await api.get(`/api/quality/project/${projectId}/dawid-skene/`);
+    return res.data;
+  },
+};
+
+// ------------------ Notifications API ------------------
+export const notificationsAPI = {
+  async list(params?: { limit?: number; offset?: number; unread_only?: boolean }): Promise<NotificationsResponse> {
+    const res = await api.get<NotificationsResponse>("/api/users/notifications/", { params });
+    return res.data;
+  },
+  
+  async unreadCount(): Promise<{ unread_count: number }> {
+    const res = await api.get<{ unread_count: number }>("/api/users/notifications/unread/count/");
+    return res.data;
+  },
+  
+  async markRead(notificationId: string): Promise<{ id: string; is_read: boolean; read_at: string | null }> {
+    const res = await api.post(`/api/users/notifications/${notificationId}/read/`);
+    return res.data;
+  },
+  
+  async markAllRead(): Promise<{ updated_count: number }> {
+    const res = await api.post("/api/users/notifications/read-all/");
     return res.data;
   },
 };

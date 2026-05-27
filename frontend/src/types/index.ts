@@ -1067,3 +1067,19 @@ export interface LeaderboardResponse {
   current_user: LeaderboardEntry | null;
   total_participants: number;
 }
+
+// ------------------ Notifications ------------------
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  data: Record<string, unknown>;
+  is_read: boolean;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationsResponse extends ApiListResponse<Notification> {
+  unread_count: number;
+}

@@ -462,7 +462,12 @@ export default function CreateProjectPage() {
                 {participantImportFile ? <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{participantImportFile.name}</div> : null}
               </div>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Executor table</div>
+                <div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Executor table</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Showing {annotators.length} executors. Selected: {selectedAnnotators.length}.
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-secondary" onClick={selectFilteredAnnotators}>Select filtered</button>
                   <button type="button" className="btn-secondary" onClick={() => setSelectedAnnotators([])}>Clear</button>
@@ -479,9 +484,9 @@ export default function CreateProjectPage() {
                   {groupOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </div>
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
+              <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200 dark:border-gray-800">
                 <table className="table min-w-full text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10">
                     <tr>
                       <th className="py-2 pr-3 text-left">Select</th>
                       <th className="py-2 pr-3 text-left">User</th>

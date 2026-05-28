@@ -26,6 +26,7 @@ const ProjectWorkflowPage = React.lazy(() => import("./pages/ProjectWorkflowPage
 const VideoIntervalsPage = React.lazy(() => import("./pages/VideoIntervalsPage"));
 const BBoxValidationPage = React.lazy(() => import("./pages/BBoxValidationPage"));
 const AnnotationPage = React.lazy(() => import("./pages/AnnotationPage"));
+const ProjectGoldenPage = React.lazy(() => import("./pages/ProjectGoldenPage"));
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -82,6 +83,18 @@ export default function App() {
           <RequireAuth>
             <Layout>
               <ProjectInstructionsPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId/golden"
+        element={
+          <RequireAuth>
+            <Layout>
+              <LazyPage>
+                <ProjectGoldenPage />
+              </LazyPage>
             </Layout>
           </RequireAuth>
         }

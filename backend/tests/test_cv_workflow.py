@@ -510,6 +510,67 @@ class TestGoldenDatasetWorkflow:
         assert negative_response.data["expected_decision"] == "needs_changes"
         assert negative_response.data["issue_type"] == "bad_geometry"
 
+    def test_manual_golden_create_upserts_existing_frame(self, client, auth_headers, user_customer):
+        project = make_cv_project(user_customer)
+        frame = make_cv_frame(project, user_customer)
+
+        first_response = client.post(
+            f"/api/projects/{project.id}/golden-candidates/",
+            {
+                "frame_id": str(frame.id),
+                "case_type": "positive",
+                "status": "candidate",
+                "reference_annotation": {"boxes": [{"x": 10, "y": 10, "width": 20, "height": 20, "label": "drone"}]},
+            },
+            **auth_headers,
+            format="json",
+        )
+        assert first_response.status_code == 201
+
+        second_response = client.post(
+            f"/api/projects/{project.id}/golden-candidates/",
+            {
+                "frame_id": str(frame.id),
+                "case_type": "positive",
+                "status": "active",
+                "reference_annotation": {"boxes": [{"x": 12, "y": 14, "width": 22, "height": 18, "label": "car"}]},
+                "review_notes": "edited visually",
+            },
+            **auth_headers,
+            format="json",
+        )
+
+        assert second_response.status_code == 201
+        assert second_response.data["golden_frame_id"] == first_response.data["golden_frame_id"]
+        assert second_response.data["status"] == GoldenFrame.STATUS_ACTIVE
+        assert GoldenFrame.objects(project=project, frame=frame).count() == 1
+        golden = GoldenFrame.objects.get(project=project, frame=frame)
+        assert golden.reference_annotation["boxes"][0]["label"] == "car"
+        assert golden.review_notes == "edited visually"
+
+    def test_other_customer_cannot_manage_golden_cases(self, client, user_customer):
+        project = make_cv_project(user_customer)
+        frame = make_cv_frame(project, user_customer)
+        other = User(email="other-customer@example.com", username="other_customer", role=User.ROLE_CUSTOMER)
+        other.set_password("test-password-for-dev-only")
+        other.save()
+        other_headers = {"HTTP_AUTHORIZATION": f"Bearer {create_access_token(other)}"}
+
+        response = client.post(
+            f"/api/projects/{project.id}/golden-candidates/",
+            {
+                "frame_id": str(frame.id),
+                "case_type": "positive",
+                "status": "active",
+                "reference_annotation": {"boxes": [{"x": 10, "y": 10, "width": 20, "height": 20, "label": "drone"}]},
+            },
+            **other_headers,
+            format="json",
+        )
+
+        assert response.status_code == 404
+        assert GoldenFrame.objects(project=project).count() == 0
+
     def test_negative_golden_is_not_used_as_annotation_hidden_task(self, user_customer, user_annotator):
         project = make_cv_project(
             user_customer,

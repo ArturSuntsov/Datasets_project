@@ -97,6 +97,7 @@ function normalizeApiBaseUrl(): string {
 }
 
 const apiBaseUrl = normalizeApiBaseUrl();
+const debugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === "true";
 
 export const api: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
@@ -104,7 +105,9 @@ export const api: AxiosInstance = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  console.log('🔵 Axios Request:', config.method?.toUpperCase(), config.url);
+  if (debugApi) {
+    console.log("Axios request:", config.method?.toUpperCase(), config.url);
+  }
   const token = getAccessToken();
   if (token) {
     config.headers = config.headers ?? {};
@@ -115,11 +118,15 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
-    console.log('🟢 Axios Response:', response.config.method?.toUpperCase(), response.config.url, response.status);
+    if (debugApi) {
+      console.log("Axios response:", response.config.method?.toUpperCase(), response.config.url, response.status);
+    }
     return response;
   },
   (error: AxiosError<ApiErrorResponse>) => {
-    console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
+    if (debugApi) {
+      console.log("Axios error:", error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
+    }
     if (!isAxiosError(error)) return Promise.reject(error);
     const { response, config } = error;
     if (!response || !config) return Promise.reject(error);

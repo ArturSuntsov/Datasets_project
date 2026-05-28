@@ -201,7 +201,11 @@ export default function ProjectDetailPage() {
     queryFn: () => workflowAPI.goldenSourceFrames(projectId!, { search: goldenFrameSearch || undefined, limit: 80 }),
     enabled: !!projectId,
   });
-  const securityEventsQuery = { isFetching: false, data: { items: [] as any[] } };
+  const securityEventsQuery = useQuery({
+    queryKey: ["project-security-events", projectId],
+    queryFn: () => workflowAPI.securityEvents(projectId!),
+    enabled: !!projectId,
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -594,6 +598,11 @@ export default function ProjectDetailPage() {
               Интервалы
             </Link>
           ) : null}
+          {projectQuery.data.project_type === "cv" ? (
+            <Link to={`/projects/${projectId}/golden`} className="btn-secondary">
+              Golden dataset
+            </Link>
+          ) : null}
           <button className="btn-secondary" onClick={() => syncWorkflowMutation.mutate()} disabled={syncWorkflowMutation.isPending}>
             {syncWorkflowMutation.isPending ? "Синхронизируем..." : "Синхронизировать"}
           </button>
@@ -834,6 +843,38 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Golden dataset</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              Hidden control examples for checking annotation quality. Open the dedicated workspace to mark frames visually and manage candidates.
+            </p>
+          </div>
+          <Link to={`/projects/${projectId}/golden`} className="btn-primary">
+            Manage golden
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Active</div>
+            <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenActiveCount}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Candidates</div>
+            <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenCandidateCount}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Retired</div>
+            <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenRetiredCount}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Positive / negative</div>
+            <div className="mt-1 font-semibold text-gray-900 dark:text-white">{activePositiveGolden}/{activeNegativeGolden}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Golden pool</h2>
@@ -1304,7 +1345,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      <div className="hidden">
+      <div className="card">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Security / audit events</h2>
           {securityEventsQuery.isFetching ? <span className="text-sm text-gray-500">Refreshing…</span> : null}

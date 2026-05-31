@@ -15,6 +15,7 @@ import { FinancePage } from "./pages/FinancePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import CreateProjectPage from "./pages/CreateProjectPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
+import ProjectInstructionsPage from "./pages/ProjectInstructionsPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import GenericLabelingPage from "./pages/GenericLabelingPage";
 
@@ -25,6 +26,7 @@ const ProjectWorkflowPage = React.lazy(() => import("./pages/ProjectWorkflowPage
 const VideoIntervalsPage = React.lazy(() => import("./pages/VideoIntervalsPage"));
 const BBoxValidationPage = React.lazy(() => import("./pages/BBoxValidationPage"));
 const AnnotationPage = React.lazy(() => import("./pages/AnnotationPage"));
+const ProjectGoldenPage = React.lazy(() => import("./pages/ProjectGoldenPage"));
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -71,6 +73,28 @@ export default function App() {
           <RequireAuth>
             <Layout>
               <ProjectDetailPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId/instructions"
+        element={
+          <RequireAuth>
+            <Layout>
+              <ProjectInstructionsPage />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId/golden"
+        element={
+          <RequireAuth>
+            <Layout>
+              <LazyPage>
+                <ProjectGoldenPage />
+              </LazyPage>
             </Layout>
           </RequireAuth>
         }

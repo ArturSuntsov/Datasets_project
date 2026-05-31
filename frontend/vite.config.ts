@@ -3,26 +3,32 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import fs from "fs";
 
-/**
- * Vite config:
- * - alias для удобных импортов
- * - proxy для `/api` на backend с логированием
- *
- * ВАЖНО: Для Docker Desktop на Windows используем host.docker.internal
- */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
   const configuredApiUrl = env.VITE_API_URL || "http://127.0.0.1:8001";
   const isDocker = fs.existsSync("/.dockerenv");
   const pointsToContainerLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?/i.test(
-    configuredApiUrl
+    configuredApiUrl,
   );
-
-  // Vite proxy runs inside the frontend container, so localhost is not the backend there.
   const apiUrl = isDocker && pointsToContainerLocalhost ? "http://web:8000" : configuredApiUrl;
+  const debugProxy = env.VITE_DEBUG_PROXY === "true";
 
-  console.log(`🔧 Vite Proxy: /api → ${apiUrl}`);
+  if (debugProxy) {
+    console.log(`Vite proxy: /api -> ${apiUrl}`);
+  }
+
+  const attachProxyDebug = (proxy: any) => {
+    proxy.on("error", (err: Error) => {
+      if (debugProxy) console.log("Proxy error:", err.message);
+    });
+    proxy.on("proxyReq", (proxyReq: any, req: any) => {
+      if (debugProxy) console.log(`Proxy -> backend: ${req.method} ${req.url} -> ${proxyReq.path}`);
+    });
+    proxy.on("proxyRes", (proxyRes: any, req: any) => {
+      if (debugProxy) console.log(`Proxy <- backend: ${req.method} ${req.url} -> status ${proxyRes.statusCode}`);
+    });
+  };
 
   return {
     plugins: [react()],
@@ -33,42 +39,19 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
-      host: '0.0.0.0',  // Слушать на всех интерфейсах для Docker
+      host: "0.0.0.0",
       proxy: {
         "/api": {
           target: apiUrl,
           changeOrigin: true,
           secure: false,
-          configure: (proxy, _options) => {
-            // Логирование ошибок proxy
-            proxy.on('error', (err, _req, _res) => {
-              console.log('❌ PROXY ERROR:', err.message);
-            });
-            // Логирование запросов
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log(`📤 PROXY → Backend: ${req.method} ${req.url} → ${proxyReq.path}`);
-            });
-            // Логирование ответов
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log(`📥 Proxy ← Backend: ${req.method} ${req.url} → Status ${proxyRes.statusCode}`);
-            });
-          },
+          configure: attachProxyDebug,
         },
-        '/media': {
+        "/media": {
           target: apiUrl,
           changeOrigin: true,
           secure: false,
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('❌ PROXY ERROR:', err.message);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log(`📤 PROXY → Backend: ${req.method} ${req.url} → ${proxyReq.path}`);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log(`📥 Proxy ← Backend: ${req.method} ${req.url} → Status ${proxyRes.statusCode}`);
-            });
-          },
+          configure: attachProxyDebug,
         },
       },
     },

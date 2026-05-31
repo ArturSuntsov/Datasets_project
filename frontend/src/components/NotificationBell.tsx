@@ -213,7 +213,7 @@ export function NotificationBell() {
                         {notifications.length === 0 ? (
                             <div className="p-4 text-center text-gray-500 dark:text-gray-400">Нет уведомлений</div>
                         ) : (
-                            notifications.map((n) => (
+                            notifications.map((n: Notification) => (
                                 <NotificationItem
                                     key={n.id}
                                     notification={n}

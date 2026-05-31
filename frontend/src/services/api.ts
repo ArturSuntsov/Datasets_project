@@ -14,7 +14,10 @@ import {
   Dataset,
   GoldenCandidatesResponse,
   GoldenCandidate,
+  GoldenSourceFrame,
+  InstructionBundle,
   LoginRequest,
+  NotificationsResponse,
   Participant,
   PaymentRequestBody,
   Project,
@@ -23,6 +26,7 @@ import {
   ProjectExportPayload,
   ProjectFinalizeResponse,
   ProjectImportResponse,
+  ProjectSourceOptionsResponse,
   ProjectOverview,
   LeaderboardResponse,
   LeaderboardEntry,
@@ -93,6 +97,7 @@ function normalizeApiBaseUrl(): string {
 }
 
 const apiBaseUrl = normalizeApiBaseUrl();
+const debugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === "true";
 
 export const api: AxiosInstance = axios.create({
   baseURL: apiBaseUrl,
@@ -100,7 +105,9 @@ export const api: AxiosInstance = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  console.log('🔵 Axios Request:', config.method?.toUpperCase(), config.url);
+  if (debugApi) {
+    console.log("Axios request:", config.method?.toUpperCase(), config.url);
+  }
   const token = getAccessToken();
   if (token) {
     config.headers = config.headers ?? {};
@@ -111,11 +118,15 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
-    console.log('🟢 Axios Response:', response.config.method?.toUpperCase(), response.config.url, response.status);
+    if (debugApi) {
+      console.log("Axios response:", response.config.method?.toUpperCase(), response.config.url, response.status);
+    }
     return response;
   },
   (error: AxiosError<ApiErrorResponse>) => {
-    console.log('🔴 Axios Error:', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
+    if (debugApi) {
+      console.log("Axios error:", error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
+    }
     if (!isAxiosError(error)) return Promise.reject(error);
     const { response, config } = error;
     if (!response || !config) return Promise.reject(error);
@@ -162,8 +173,9 @@ export const authAPI = {
 };
 
 export const participantsAPI = {
-  async list(role?: "annotator" | "reviewer"): Promise<ApiListResponse<Participant>> {
-    const res = await api.get<ApiListResponse<Participant>>("/api/users/participants/", { params: role ? { role } : undefined });
+  async list(params?: "annotator" | { role?: "annotator"; search?: string; specialization?: string; group?: string; limit?: number; offset?: number }): Promise<ApiListResponse<Participant>> {
+    const query = typeof params === "string" ? { role: params } : params;
+    const res = await api.get<ApiListResponse<Participant>>("/api/users/participants/", { params: query });
     return res.data;
   },
 };
@@ -173,12 +185,16 @@ export const projectsAPI = {
     const res = await api.post<Project>("/api/projects/", body);
     return res.data;
   },
-  async list(params?: { limit?: number; offset?: number }): Promise<ApiListResponse<Project>> {
+  async list(params?: { limit?: number; offset?: number; search?: string; status?: string; task_type?: string; annotation_type?: string }): Promise<ApiListResponse<Project>> {
     const res = await api.get<ApiListResponse<Project>>("/api/projects/", { params });
     return res.data;
   },
   async taskRegistry(): Promise<TaskRegistryResponse> {
     const res = await api.get<TaskRegistryResponse>("/api/projects/task-registry/");
+    return res.data;
+  },
+  async sourceOptions(taskType: string): Promise<ProjectSourceOptionsResponse> {
+    const res = await api.get<ProjectSourceOptionsResponse>("/api/projects/source-options/", { params: { task_type: taskType } });
     return res.data;
   },
   async get(id: string): Promise<Project> {
@@ -187,6 +203,14 @@ export const projectsAPI = {
   },
   async update(id: string, body: Partial<CreateProjectRequest>): Promise<Project> {
     const res = await api.patch<Project>(`/api/projects/${id}/`, body);
+    return res.data;
+  },
+  async pause(id: string): Promise<Project> {
+    const res = await api.post<Project>(`/api/projects/${id}/pause/`, {});
+    return res.data;
+  },
+  async resume(id: string): Promise<Project> {
+    const res = await api.post<Project>(`/api/projects/${id}/resume/`, {});
     return res.data;
   },
   async delete(id: string): Promise<void> {
@@ -207,11 +231,40 @@ export const projectsAPI = {
     });
     return res.data as any;
   },
-  async importParticipantsCsv(projectId: string, file: File): Promise<{ created_users: number; linked_memberships: number; skipped_rows: number }> {
+  async instructions(projectId: string): Promise<InstructionBundle> {
+    const res = await api.get<InstructionBundle>(`/api/projects/${projectId}/instructions/`);
+    return res.data;
+  },
+  async updateInstructions(projectId: string, instructions: string): Promise<InstructionBundle> {
+    const res = await api.patch<InstructionBundle>(`/api/projects/${projectId}/instructions/`, { instructions });
+    return res.data;
+  },
+  async createInstructionAsset(projectId: string, body: FormData | { asset_type: string; title?: string; body?: string; url?: string }): Promise<{ bundle: InstructionBundle }> {
+    if (body instanceof FormData) {
+      const res = await api.post<{ bundle: InstructionBundle }>(`/api/projects/${projectId}/instructions/assets/`, body, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return res.data;
+    }
+    const res = await api.post<{ bundle: InstructionBundle }>(`/api/projects/${projectId}/instructions/assets/`, body);
+    return res.data;
+  },
+  async createInstructionExample(projectId: string, body: FormData | { example_type: "good" | "bad" | "annotated"; title?: string; body?: string; url?: string; label_data?: Record<string, unknown> }): Promise<{ bundle: InstructionBundle }> {
+    if (body instanceof FormData) {
+      const res = await api.post<{ bundle: InstructionBundle }>(`/api/projects/${projectId}/instructions/examples/`, body, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return res.data;
+    }
+    const res = await api.post<{ bundle: InstructionBundle }>(`/api/projects/${projectId}/instructions/examples/`, body);
+    return res.data;
+  },
+  async importParticipantsCsv(projectId: string, file: File): Promise<Blob> {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await api.post<{ created_users: number; linked_memberships: number; skipped_rows: number }>(`/api/projects/${projectId}/participants/import-csv/`, formData, {
+    const res = await api.post<Blob>(`/api/projects/${projectId}/participants/import-csv/`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
+      responseType: "blob",
     });
     return res.data;
   },
@@ -250,9 +303,12 @@ export const projectsAPI = {
 };
 
 export const workflowAPI = {
-  async upload(projectId: string, file: File, importId?: string | null): Promise<ProjectImportResponse> {
+  async upload(projectId: string, file: File, importId?: string | null, annotationFile?: File | null): Promise<ProjectImportResponse> {
     const formData = new FormData();
     formData.append("file", file);
+    if (annotationFile) {
+      formData.append("annotation_file", annotationFile);
+    }
     if (importId) {
       formData.append("import_id", importId);
     }
@@ -291,6 +347,24 @@ export const workflowAPI = {
   },
   async goldenCandidates(projectId: string): Promise<GoldenCandidatesResponse> {
     const res = await api.get<GoldenCandidatesResponse>(`/api/projects/${projectId}/golden-candidates/`);
+    return res.data;
+  },
+  async goldenSourceFrames(projectId: string, params?: { search?: string; limit?: number; offset?: number }): Promise<ApiListResponse<GoldenSourceFrame>> {
+    const res = await api.get<ApiListResponse<GoldenSourceFrame>>(`/api/projects/${projectId}/golden-source-frames/`, { params });
+    return res.data;
+  },
+  async createGoldenCandidate(projectId: string, body: {
+    frame_id: string;
+    case_type: "positive" | "negative";
+    usage?: "control" | "instruction_example" | "both";
+    expected_decision?: "approve" | "needs_changes";
+    issue_type?: string;
+    status?: "candidate" | "active";
+    review_notes?: string;
+    reference_annotation: Record<string, unknown>;
+    probe_annotation?: Record<string, unknown>;
+  }): Promise<GoldenCandidate> {
+    const res = await api.post<GoldenCandidate>(`/api/projects/${projectId}/golden-candidates/`, body);
     return res.data;
   },
   async promoteGoldenCandidate(projectId: string, goldenFrameId: string, reviewNotes?: string): Promise<any> {
@@ -351,6 +425,10 @@ export const annotatorAPI = {
   },
   async projectDetail(projectId: string): Promise<AnnotatorProjectDetail> {
     const res = await api.get<AnnotatorProjectDetail>(`/api/annotator/projects/${projectId}/`);
+    return res.data;
+  },
+  async acknowledgeInstructions(projectId: string): Promise<InstructionBundle> {
+    const res = await api.post<InstructionBundle>(`/api/annotator/projects/${projectId}/instructions/ack/`, {});
     return res.data;
   },
   async nextProjectAssignment(projectId: string): Promise<{ assignment_id: string; source: string }> {

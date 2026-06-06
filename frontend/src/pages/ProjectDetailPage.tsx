@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -6,6 +6,8 @@ import { projectsAPI, workflowAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
 import { getTaskFlowCopy, getTaskGroupLabel } from "../lib/taskFlowCopy";
+import { AnnotatedFramesGallery } from "../components/AnnotatedFramesGallery";
+import { isCustomerRole } from "../utils/roles";
 import type { GoldenSourceFrame, ProjectExportArtifact, ProjectExportArtifactName, ProjectExportFormat } from "../types";
 
 const EMPTY_GOLDEN_BOX = { x: 0, y: 0, width: 100, height: 100, label: "drone" };
@@ -62,6 +64,8 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const [activeTab, setActiveTab] = useState<"overview" | "annotated">("overview");
+  const canViewAnnotated = isCustomerRole(user?.role);
   const [uploadQueue, setUploadQueue] = useState<File[]>([]);
   const [validationAnnotationFile, setValidationAnnotationFile] = useState<File | null>(null);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
@@ -186,6 +190,26 @@ export default function ProjectDetailPage() {
     },
     onError: (err: any) => {
       setArchiveError(err?.response?.data?.detail || err?.message || "Не удалось экспортировать архив");
+    },
+  });
+
+  const approvePendingMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("Project id missing");
+      if (!confirm("Одобрить все завершённые кадры, ожидающие валидации? Они появятся во вкладке «Размеченные кадры».")) {
+        throw new Error("cancelled");
+      }
+      return projectsAPI.approveAllPending(projectId);
+    },
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["annotated-frames", projectId] });
+      alert(`Одобрено кадров: ${data.updated}`);
+    },
+    onError: (err: unknown) => {
+      if (err instanceof Error && err.message === "cancelled") return;
+      const detail = isAxiosError(err) ? err.response?.data?.detail : undefined;
+      alert(`Ошибка: ${detail || (err instanceof Error ? err.message : "Неизвестная ошибка")}`);
     },
   });
 
@@ -391,6 +415,10 @@ export default function ProjectDetailPage() {
   const completedWorkItems = Number(overview?.work_items?.completed || 0);
   const approvedExportItems = isGenericTask ? genericCompleted : Number((overview?.work_items as any)?.validation_approved || 0);
   const validationPendingItems = Number((overview?.work_items as any)?.validation_pending || 0);
+  const publishablePendingItems = Number(
+    (overview?.work_items as any)?.publishable_pending ?? validationPendingItems
+  );
+  const customerGalleryTotal = Number((overview?.work_items as any)?.customer_gallery_total ?? 0);
   const validationDisputedItems = Number((overview?.work_items as any)?.validation_disputed || 0);
   const insufficientAnnotatorItems = Number((overview?.work_items as any)?.insufficient_annotators || 0);
   const insufficientValidatorItems = Number((overview?.work_items as any)?.insufficient_validators || 0);
@@ -536,8 +564,8 @@ export default function ProjectDetailPage() {
     );
   }
 
-  return (
-    <div className="space-y-6">
+  const projectOverviewContent = (
+    <>
       <div className="flex items-start justify-between gap-6">
         <div>
           <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -1372,7 +1400,73 @@ export default function ProjectDetailPage() {
           <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg bg-gray-950 p-4 text-xs text-green-200">{exportPayload}</pre>
         </div>
       ) : null}
+    </>
+  );
 
+  return (
+    <div className="space-y-6">
+      {canViewAnnotated ? (
+        <>
+          <div className="border-b border-gray-200 dark:border-gray-700 mb-4">
+            <nav className="-mb-px flex space-x-8">
+              <button
+                type="button"
+                onClick={() => setActiveTab("overview")}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === "overview"
+                  ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"}`}
+              >
+                Обзор проекта
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("annotated")}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === "annotated"
+                  ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"}`}
+              >
+                Размеченные кадры
+              </button>
+            </nav>
+          </div>
+
+          {activeTab === "overview" && projectOverviewContent}
+          {activeTab === "annotated" && (
+            <div className="card">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Размеченные кадры</h2>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                    Кадры появляются сразу после отправки разметки исполнителем. Всего:{" "}
+                    {customerGalleryTotal || "—"}
+                    {publishablePendingItems > 0 ? ` · ждут одобрения: ${publishablePendingItems}` : ""}
+                    {approvedExportItems > 0 ? ` · одобрено: ${approvedExportItems}` : ""}
+                  </p>
+                </div>
+                {publishablePendingItems > 0 ? (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => approvePendingMutation.mutate()}
+                    disabled={approvePendingMutation.isPending}
+                  >
+                    {approvePendingMutation.isPending ? "Одобряем..." : "Одобрить ожидающие"}
+                  </button>
+                ) : null}
+              </div>
+              <AnnotatedFramesGallery
+                projectId={projectId!}
+                isActive={activeTab === "annotated"}
+                pendingValidationCount={publishablePendingItems}
+                onApprovePending={() => approvePendingMutation.mutate()}
+                isApproving={approvePendingMutation.isPending}
+              />
+            </div>
+          )}
+        </>
+      ) : (
+        projectOverviewContent
+      )}
     </div>
   );
 }

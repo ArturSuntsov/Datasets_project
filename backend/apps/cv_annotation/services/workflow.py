@@ -121,7 +121,7 @@ DEFAULT_INTERVAL_VALIDATORS_PER_ITEM = 3
 DEFAULT_BBOX_VALIDATORS_PER_BATCH = 3
 DEFAULT_BBOX_REAL_ITEMS_PER_BATCH = 20
 DEFAULT_BBOX_GOLDEN_ITEMS_PER_BATCH = 10
-DEFAULT_GOLDEN_MIN_SCORE = 0.8
+DEFAULT_GOLDEN_MIN_SCORE = 0.5
 DEFAULT_GOLDEN_SAMPLE_RATIO = 0.3
 DEFAULT_ANNOTATION_GOLDEN_RATIO = 0.3
 DEFAULT_VIDEO_CHUNK_DURATION_SEC = 45
@@ -170,6 +170,11 @@ def workflow_runtime_settings(project: Project) -> dict:
         "bbox_golden_items_per_batch": _int_rule(project, "bbox_golden_items_per_batch", DEFAULT_BBOX_GOLDEN_ITEMS_PER_BATCH),
         "golden_min_score": golden_pass_threshold,
         "golden_pass_threshold": golden_pass_threshold,
+        "annotation_golden_pass_threshold": _float_rule(
+            project,
+            "annotation_golden_pass_threshold",
+            min(golden_pass_threshold, DEFAULT_GOLDEN_MIN_SCORE),
+        ),
         "golden_sample_ratio": _float_rule(project, "golden_sample_ratio", DEFAULT_GOLDEN_SAMPLE_RATIO),
         "video_chunk_duration_sec": _int_rule(project, "video_chunk_duration_sec", DEFAULT_VIDEO_CHUNK_DURATION_SEC),
         "video_chunk_min_duration_sec": _int_rule(project, "video_chunk_min_duration_sec", DEFAULT_VIDEO_CHUNK_MIN_DURATION_SEC),
@@ -3681,7 +3686,7 @@ def submit_golden_annotation_assignment(
     golden = assignment.golden_frame
     comparison = compare_bbox_annotations(golden.reference_annotation, label_data, assignment.project.iou_threshold)
     score = float(comparison.get("quality_score", comparison.get("f1", 0.0)) or 0.0)
-    pass_threshold = workflow_runtime_settings(assignment.project)["golden_pass_threshold"]
+    pass_threshold = workflow_runtime_settings(assignment.project)["annotation_golden_pass_threshold"]
     passed = score >= pass_threshold
     attempt = GoldenAttempt(
         project=assignment.project,

@@ -152,7 +152,7 @@ export default function AnnotationPage() {
         isGoldenCheck &&
         (metrics.passed === false || accessStatus === "retraining_required")
       ) {
-        navigate(`/projects/${assignmentQuery.data!.project_id}/instructions`);
+        navigate(`/labeling/projects/${assignmentQuery.data!.project_id}`);
         return;
       }
       if (

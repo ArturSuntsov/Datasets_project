@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { annotatorAPI } from "../services/api";
@@ -13,6 +13,105 @@ type InstructionPanelProps = {
   autoOpen?: boolean;
   buttonLabel?: string;
 };
+
+type ExampleBox = { x: number; y: number; width: number; height: number; label?: string; color?: string };
+type FocusRect = { x: number; y: number; width: number; height: number } | null;
+type ViewportSize = { width: number; height: number };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function useElementSize(ref: RefObject<HTMLElement>): ViewportSize {
+  const [size, setSize] = useState<ViewportSize>({ width: 1, height: 1 });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const update = () => setSize({ width: Math.max(element.clientWidth, 1), height: Math.max(element.clientHeight, 1) });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ref]);
+  return size;
+}
+
+function normalizeExampleBox(raw: Record<string, unknown>, imageWidth: number, imageHeight: number): ExampleBox | null {
+  let x = Number(raw.x ?? raw.left ?? raw.x_min ?? raw.x1 ?? 0);
+  let y = Number(raw.y ?? raw.top ?? raw.y_min ?? raw.y1 ?? 0);
+  let width = Number(raw.width ?? raw.w ?? 0);
+  let height = Number(raw.height ?? raw.h ?? 0);
+  const x2 = Number(raw.x2 ?? raw.right ?? raw.x_max ?? Number.NaN);
+  const y2 = Number(raw.y2 ?? raw.bottom ?? raw.y_max ?? Number.NaN);
+
+  if ((!width || !height) && Number.isFinite(x2) && Number.isFinite(y2)) {
+    width = x2 - x;
+    height = y2 - y;
+  }
+
+  const values = [x, y, width, height].map(Math.abs);
+  const looksNormalized = imageWidth > 10 && imageHeight > 10 && values.every((value) => value <= 1.0001);
+  if (looksNormalized) {
+    x *= imageWidth;
+    y *= imageHeight;
+    width *= imageWidth;
+    height *= imageHeight;
+  }
+
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width < 0) {
+    x += width;
+    width = Math.abs(width);
+  }
+  if (height < 0) {
+    y += height;
+    height = Math.abs(height);
+  }
+  if (width <= 0 || height <= 0) return null;
+
+  const left = clamp(x, 0, imageWidth);
+  const top = clamp(y, 0, imageHeight);
+  const right = clamp(x + width, 0, imageWidth);
+  const bottom = clamp(y + height, 0, imageHeight);
+  if (right <= left || bottom <= top) return null;
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+    label: String(raw.label || raw.class_name || raw.category || ""),
+    color: typeof raw.color === "string" ? raw.color : undefined,
+  };
+}
+
+function boxesBoundingRect(boxes: ExampleBox[]): FocusRect {
+  if (!boxes.length) return null;
+  const left = Math.min(...boxes.map((box) => box.x));
+  const top = Math.min(...boxes.map((box) => box.y));
+  const right = Math.max(...boxes.map((box) => box.x + box.width));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function paddedRect(rect: FocusRect, imageWidth: number, imageHeight: number): FocusRect {
+  if (!rect) return null;
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  const targetWidth = Math.min(imageWidth, Math.max(rect.width * 4.2, imageWidth * 0.16));
+  const targetHeight = Math.min(imageHeight, Math.max(rect.height * 4.2, imageHeight * 0.16));
+  const left = clamp(centerX - targetWidth / 2, 0, Math.max(imageWidth - targetWidth, 0));
+  const top = clamp(centerY - targetHeight / 2, 0, Math.max(imageHeight - targetHeight, 0));
+  return { x: left, y: top, width: Math.max(targetWidth, 1), height: Math.max(targetHeight, 1) };
+}
+
+function clampPan(value: number, viewportSize: number, imageSize: number) {
+  if (imageSize <= viewportSize) return (viewportSize - imageSize) / 2;
+  return clamp(value, viewportSize - imageSize, 0);
+}
 
 function assetKindLabel(asset: InstructionAsset) {
   const labels: Record<string, string> = {
@@ -42,26 +141,73 @@ function dedupeAssets(assets: InstructionAsset[]) {
 }
 
 function ExampleImage({ asset }: { asset: InstructionAsset }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewport = useElementSize(containerRef);
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [imageFailed, setImageFailed] = useState(false);
   const boxes = Array.isArray((asset.label_data as any)?.boxes)
     ? ((asset.label_data as any).boxes as Array<Record<string, unknown>>)
     : [];
-  const width = Math.max(Number((asset.label_data as any)?.width || 1), 1);
-  const height = Math.max(Number((asset.label_data as any)?.height || 1), 1);
+  const width = Math.max(Number(naturalSize?.width || (asset.label_data as any)?.width || 1), 1);
+  const height = Math.max(Number(naturalSize?.height || (asset.label_data as any)?.height || 1), 1);
+  const hasImageDimensions = Boolean(naturalSize || ((asset.label_data as any)?.width && (asset.label_data as any)?.height));
+  const normalizedBoxes = useMemo(
+    () => boxes.map((box) => normalizeExampleBox(box, width, height)).filter(Boolean) as ExampleBox[],
+    [boxes, height, width],
+  );
+  const rect = boxesBoundingRect(normalizedBoxes);
+  const target = paddedRect(rect, width, height);
+  const baseFitScale = Math.min(viewport.width / width, viewport.height / height);
+  const targetScale = target ? Math.min(viewport.width / target.width, viewport.height / target.height) : baseFitScale;
+  const scale = clamp(target ? targetScale : baseFitScale, baseFitScale * 0.75, baseFitScale * 10);
+  const centerX = target ? target.x + target.width / 2 : width / 2;
+  const centerY = target ? target.y + target.height / 2 : height / 2;
+  const scaledWidth = width * scale;
+  const scaledHeight = height * scale;
+  const left = clampPan(viewport.width / 2 - centerX * scale, viewport.width, scaledWidth);
+  const top = clampPan(viewport.height / 2 - centerY * scale, viewport.height, scaledHeight);
+  const boxColor = asset.asset_type === "bad_example" ? "#f87171" : "#34d399";
+
+  useEffect(() => {
+    setNaturalSize(null);
+    setImageFailed(false);
+  }, [asset.file_uri]);
+
   if (!asset.file_uri || !boxes.length) return null;
   return (
-    <div className="mt-3 overflow-hidden rounded-md border border-gray-200 bg-gray-950 dark:border-gray-800">
-      <div className="relative mx-auto max-h-80 w-full max-w-3xl">
-        <img src={asset.file_uri} alt={asset.title || "instruction example"} className="block h-auto max-h-80 w-full object-contain" />
-        {boxes.map((box, index) => (
+    <div className="mt-3 overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-gray-900">
+      <div ref={containerRef} className="relative h-80 w-full overflow-hidden">
+        {!imageFailed ? (
+          <img
+            src={asset.file_uri}
+            alt={asset.title || "instruction example"}
+            className="absolute select-none"
+            draggable={false}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              setImageFailed(false);
+              if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
+              }
+            }}
+            onError={() => setImageFailed(true)}
+            style={{ left, top, width: scaledWidth, height: scaledHeight, maxWidth: "none", maxHeight: "none" }}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-gray-500">
+            Не удалось загрузить изображение примера.
+          </div>
+        )}
+        {hasImageDimensions && normalizedBoxes.map((box, index) => (
           <div
             key={`${asset.id}-${index}`}
             className="absolute border-2 border-emerald-400"
             style={{
-              left: `${(Number(box.x || 0) / width) * 100}%`,
-              top: `${(Number(box.y || 0) / height) * 100}%`,
-              width: `${(Number(box.width || 0) / width) * 100}%`,
-              height: `${(Number(box.height || 0) / height) * 100}%`,
-              borderColor: asset.asset_type === "bad_example" ? "#f87171" : "#34d399",
+              left: left + box.x * scale,
+              top: top + box.y * scale,
+              width: box.width * scale,
+              height: box.height * scale,
+              borderColor: box.color || boxColor,
               boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
             }}
           >

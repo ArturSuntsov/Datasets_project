@@ -1,9 +1,9 @@
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { projectsAPI } from "../services/api";
+import { annotatorAPI, projectsAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store";
-import type { InstructionAsset } from "../types";
+import type { AnnotatorProjectDetail, InstructionAsset, Project } from "../types";
 
 function isHtmlFile(name?: string, uri?: string) {
   const value = `${name || ""} ${uri || ""}`.toLowerCase();
@@ -61,27 +61,35 @@ function InstructionExampleCard({ asset }: { asset: InstructionAsset }) {
 export default function ProjectInstructionsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const user = useAuthStore((state) => state.user);
+  const isAnnotatorOnly = user?.role === "annotator";
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => projectsAPI.get(projectId!),
-    enabled: !!projectId,
+    enabled: !!projectId && !isAnnotatorOnly,
+  });
+  const annotatorProjectQuery = useQuery({
+    queryKey: ["annotator-project-detail", projectId],
+    queryFn: () => annotatorAPI.projectDetail(projectId!),
+    enabled: !!projectId && isAnnotatorOnly,
   });
   const instructionsQuery = useQuery({
     queryKey: ["project-instructions", projectId],
     queryFn: () => projectsAPI.instructions(projectId!),
-    enabled: !!projectId,
+    enabled: !!projectId && !isAnnotatorOnly,
   });
 
-  if (projectQuery.isLoading) return <LoadingSpinner />;
-  if (projectQuery.isError || !projectQuery.data) {
+  const isLoading = isAnnotatorOnly ? annotatorProjectQuery.isLoading : projectQuery.isLoading;
+  const project = (isAnnotatorOnly ? annotatorProjectQuery.data : projectQuery.data) as (Project | AnnotatorProjectDetail | undefined);
+  if (isLoading) return <LoadingSpinner />;
+  if (!project) {
     return <div className="card text-sm text-red-600">Инструкция недоступна.</div>;
   }
 
-  const project = projectQuery.data;
   const fileUri = project.instructions_file_uri || "";
   const fileName = project.instructions_file_name || "instruction";
   const html = isHtmlFile(fileName, fileUri);
   const bundle = instructionsQuery.data ?? project.instructions_bundle;
+  const projectTitle = "project_title" in project ? project.project_title : project.title;
   const assets = dedupeAssets(bundle?.assets ?? []);
   const goodExamples = assets.filter((asset) => asset.asset_type === "good_example" || asset.asset_type === "annotated_example");
   const badExamples = assets.filter((asset) => asset.asset_type === "bad_example");
@@ -92,9 +100,9 @@ export default function ProjectInstructionsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Инструкция проекта</h1>
-          <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">{project.title}</div>
+          <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">{projectTitle}</div>
         </div>
-        <Link className="btn-secondary" to={`/projects/${project.id}`}>
+        <Link className="btn-secondary" to={isAnnotatorOnly ? `/labeling/projects/${projectId}` : `/projects/${projectId}`}>
           К проекту
         </Link>
       </div>
@@ -119,7 +127,7 @@ export default function ProjectInstructionsPage() {
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Активные кейсы Golden dataset с назначением для инструкции отображаются здесь автоматически.</p>
           </div>
           {canManageExamples ? (
-            <Link className="btn-secondary" to={`/projects/${project.id}/golden`}>
+            <Link className="btn-secondary" to={`/projects/${projectId}/golden`}>
               Создать примеры Golden dataset
             </Link>
           ) : null}

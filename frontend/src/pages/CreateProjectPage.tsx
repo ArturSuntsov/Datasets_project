@@ -106,7 +106,7 @@ export default function CreateProjectPage() {
   const [frameInterval, setFrameInterval] = useState("1");
   const [assignmentsPerTask, setAssignmentsPerTask] = useState("2");
   const [agreementThreshold, setAgreementThreshold] = useState("0.75");
-  const [goldenPassThreshold, setGoldenPassThreshold] = useState("0.8");
+  const [goldenPassThreshold, setGoldenPassThreshold] = useState("0.5");
   const [goldenSampleRatio, setGoldenSampleRatio] = useState("0.3");
   const [annotationGoldenRatio, setAnnotationGoldenRatio] = useState("0.3");
   const [bboxRealItemsPerBatch, setBboxRealItemsPerBatch] = useState("20");
@@ -234,8 +234,8 @@ export default function CreateProjectPage() {
           group: groupRule,
           assignment_scope: selectedAnnotators.length ? "selected_only" : "all",
           quality_strategy: taskConfig.quality_strategy,
-          golden_pass_threshold: Number(goldenPassThreshold) || 0.8,
-          golden_min_score: Number(goldenPassThreshold) || 0.8,
+          golden_pass_threshold: Number(goldenPassThreshold) || 0.5,
+          golden_min_score: Number(goldenPassThreshold) || 0.5,
           golden_sample_ratio: Number(goldenSampleRatio) || 0.3,
           annotation_golden_ratio: Number(annotationGoldenRatio) || 0.3,
           bbox_real_items_per_batch: Number(bboxRealItemsPerBatch) || 20,

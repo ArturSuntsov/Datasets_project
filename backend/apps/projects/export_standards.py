@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import struct
 import tempfile
@@ -54,7 +55,13 @@ def collect_project_export_bundle(project: Project) -> ExportBundle:
 
     images: List[ExportImage] = []
     ann_counter = 1
-    for image_id, work_item in enumerate(WorkItem.objects(project=project), start=1):
+    # Только WorkItem со статусом COMPLETED и VALIDATION_APPROVED
+    for image_id, work_item in enumerate(
+        WorkItem.objects(project=project, status=WorkItem.STATUS_COMPLETED),
+        start=1,
+    ):
+        if work_item.validation_status != WorkItem.VALIDATION_APPROVED:
+            continue
         frame = getattr(work_item, "frame", None)
         if not frame:
             continue
@@ -71,54 +78,56 @@ def collect_project_export_bundle(project: Project) -> ExportBundle:
             abs_path=str(abs_path) if abs_path else "",
         )
 
-        annotations = list(WorkAnnotation.objects(work_item=work_item, status__in=["accepted", "submitted"]))
-        if not annotations and getattr(work_item, "final_annotation", None):
-            annotations = [type("FinalAnnotation", (), {"id": f"final-{work_item.id}", "label_data": work_item.final_annotation})()]
-
-        for ann in annotations:
-            for box in _extract_boxes(getattr(ann, "label_data", {}) or {}, width, height):
-                category_name = box.get("label") or labels[0]["name"]
-                category_id = category_by_name.get(category_name, labels[0]["id"])
-                polygons = _extract_polygons(getattr(ann, "label_data", {}) or {}, width, height)
-                keypoints = _extract_keypoints(getattr(ann, "label_data", {}) or {}, width, height)
-                image.annotations.append(
-                    ExportAnnotation(
-                        id=ann_counter,
-                        category_id=category_id,
-                        category_name=category_name,
-                        bbox=(box["x"], box["y"], box["width"], box["height"]),
-                        polygons=polygons,
-                        keypoints=keypoints,
-                    )
+        # Используем final_annotation из work_item
+        final_annotation = getattr(work_item, "final_annotation", None) or {}
+        boxes_data = final_annotation.get("boxes", []) if isinstance(final_annotation, dict) else []
+        for box in _extract_boxes({"boxes": boxes_data}, width, height):
+            category_name = box.get("label") or labels[0]["name"]
+            category_id = category_by_name.get(category_name, labels[0]["id"])
+            image.annotations.append(
+                ExportAnnotation(
+                    id=ann_counter,
+                    category_id=category_id,
+                    category_name=category_name,
+                    bbox=(box["x"], box["y"], box["width"], box["height"]),
                 )
-                ann_counter += 1
+            )
+            ann_counter += 1
 
         images.append(image)
     return ExportBundle(project_id=str(project.id), categories=labels, images=images)
 
 
 def export_voc_zip(bundle: ExportBundle) -> tuple[str, str, int]:
+    """
+    ZIP-архив только с папкой Annotations/ (XML-файлы). Без JPEGImages/ и прочего.
+    """
     tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
     skipped = 0
     with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for image in bundle.images:
-            if image.abs_path and os.path.exists(image.abs_path):
-                zf.write(image.abs_path, arcname=f"JPEGImages/{image.file_name}")
-            else:
-                skipped += 1
             xml_bytes = _build_voc_xml(image)
             xml_name = f"{Path(image.file_name).stem}.xml"
             zf.writestr(f"Annotations/{xml_name}", xml_bytes)
+            if not image.abs_path or not os.path.exists(image.abs_path):
+                skipped += 1
     return tmp_path, f"project-{bundle.project_id}-voc.zip", skipped
 
 
-def export_coco_zip(bundle: ExportBundle) -> tuple[str, str, int]:
-    tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
-    skipped = 0
+def export_coco_json(bundle: ExportBundle) -> tuple[str, str]:
+    """
+    Один JSON-файл (не архив) со структурой COCO.
+    Содержит images, categories, annotations. Без файлов изображений.
+    """
     images = []
     annotations = []
     for image in bundle.images:
-        images.append({"id": image.id, "file_name": image.file_name, "width": image.width, "height": image.height})
+        images.append({
+            "id": image.id,
+            "file_name": image.file_name,
+            "width": image.width,
+            "height": image.height,
+        })
         for ann in image.annotations:
             coco_ann = {
                 "id": ann.id,
@@ -134,18 +143,20 @@ def export_coco_zip(bundle: ExportBundle) -> tuple[str, str, int]:
                 coco_ann["keypoints"] = ann.keypoints
                 coco_ann["num_keypoints"] = len(ann.keypoints) // 3 if len(ann.keypoints) % 3 == 0 else len(ann.keypoints) // 2
             annotations.append(coco_ann)
-    payload = {"images": images, "categories": [{"id": c["id"], "name": c["name"], "supercategory": ""} for c in bundle.categories], "annotations": annotations}
-    with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("annotations.json", _json_bytes(payload))
-        for image in bundle.images:
-            if image.abs_path and os.path.exists(image.abs_path):
-                zf.write(image.abs_path, arcname=f"images/{image.file_name}")
-            else:
-                skipped += 1
-    return tmp_path, f"project-{bundle.project_id}-coco.zip", skipped
+    payload = {
+        "images": images,
+        "categories": [{"id": c["id"], "name": c["name"], "supercategory": ""} for c in bundle.categories],
+        "annotations": annotations,
+    }
+    filename = f"project-{bundle.project_id}-coco.json"
+    return json.dumps(payload, ensure_ascii=False, indent=2), filename
 
 
 def export_yolo_zip(bundle: ExportBundle) -> tuple[str, str, int]:
+    """
+    ZIP-архив только с папкой labels/ (txt-файлы) и classes.txt в корне.
+    Без папки images/.
+    """
     tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
     skipped = 0
     classes = sorted(bundle.categories, key=lambda x: x["id"])
@@ -153,9 +164,7 @@ def export_yolo_zip(bundle: ExportBundle) -> tuple[str, str, int]:
     with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("classes.txt", "\n".join(item["name"] for item in classes) + "\n")
         for image in bundle.images:
-            if image.abs_path and os.path.exists(image.abs_path):
-                zf.write(image.abs_path, arcname=f"images/{image.file_name}")
-            else:
+            if not image.abs_path or not os.path.exists(image.abs_path):
                 skipped += 1
             label_name = f"{Path(image.file_name).stem}.txt"
             lines = []
@@ -173,15 +182,18 @@ def export_yolo_zip(bundle: ExportBundle) -> tuple[str, str, int]:
 
 
 def export_tfrecord(bundle: ExportBundle) -> tuple[str, str, int]:
+    """
+    TFRecord-файл только с аннотациями, без закодированных изображений.
+    image/encoded содержит пустой байтовый массив.
+    """
     tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".tfrecord").name
     skipped = 0
     with open(tmp_path, "wb") as out:
         for image in bundle.images:
             if not image.abs_path or not os.path.exists(image.abs_path):
                 skipped += 1
-                continue
-            with open(image.abs_path, "rb") as source:
-                encoded = source.read()
+            # Пустой байтовый массив вместо реального изображения
+            encoded = b""
             xmins: List[float] = []
             ymins: List[float] = []
             xmaxs: List[float] = []
@@ -218,11 +230,7 @@ def export_tfrecord(bundle: ExportBundle) -> tuple[str, str, int]:
 
 def _build_voc_xml(image: ExportImage) -> bytes:
     root = ET.Element("annotation")
-    ET.SubElement(root, "folder").text = "JPEGImages"
     ET.SubElement(root, "filename").text = image.file_name
-    ET.SubElement(root, "path").text = image.abs_path
-    source = ET.SubElement(root, "source")
-    ET.SubElement(source, "database").text = "Unknown"
     size = ET.SubElement(root, "size")
     ET.SubElement(size, "width").text = str(image.width)
     ET.SubElement(size, "height").text = str(image.height)
@@ -305,12 +313,6 @@ def _extract_keypoints(label_data: Dict, width: int, height: int) -> List[float]
             x, y = x * width, y * height
         result.extend([x, y, 2])
     return result
-
-
-def _json_bytes(data: Dict) -> bytes:
-    import json
-
-    return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
 
 # ---- Minimal TFRecord writer ----

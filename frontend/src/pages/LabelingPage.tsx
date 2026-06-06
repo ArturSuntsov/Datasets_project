@@ -44,15 +44,6 @@ export function LabelingPage() {
     enabled: user?.role === "annotator" || user?.role === "admin",
   });
 
-  if (user?.role !== "annotator" && user?.role !== "admin") {
-    return (
-      <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Проекты разметки</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Этот раздел доступен исполнителям и администраторам.</p>
-      </div>
-    );
-  }
-
   const availableProjects = projectsQuery.data?.available_projects ?? [];
   const activeProjects = projectsQuery.data?.active_projects ?? [];
   const completedProjects = projectsQuery.data?.completed_projects ?? [];
@@ -69,6 +60,15 @@ export function LabelingPage() {
   const queueCount =
     availableProjects.reduce((sum, item) => sum + Number(item.available_count || 0), 0) +
     activeProjects.reduce((sum, item) => sum + Number(item.active_count || 0), 0);
+
+  if (user?.role !== "annotator" && user?.role !== "admin") {
+    return (
+      <div className="card p-8 text-center">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Проекты разметки</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Этот раздел доступен исполнителям и администраторам.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -156,6 +156,15 @@ export function LabelingPage() {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                 {filteredProjects.map((project: any) => {
                   const completedCount = Number(project.completed_count ?? Number(project.accepted_count || 0) + Number(project.rejected_count || 0));
+                  const accessStatus = String(project.access_state?.status || "qualified");
+                  const actionLabel =
+                    accessStatus === "instruction_required"
+                      ? "Инструкция"
+                      : accessStatus === "qualification_required"
+                        ? "Пройти тест"
+                        : accessStatus === "retraining_required"
+                          ? "Повторить инструкцию"
+                          : "Открыть";
                   return (
                     <tr key={project.stage_project_id ?? `${project.project_id}:${project.stage ?? "parent"}`} className="hover:bg-gray-50 dark:hover:bg-gray-900">
                       <td className="px-4 py-3">
@@ -175,7 +184,7 @@ export function LabelingPage() {
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{formatDate(project.last_activity_at)}</td>
                       <td className="px-4 py-3 text-right">
                         <Link to={project.route || `/labeling/projects/${project.project_id}`} className="btn-primary">
-                          Открыть
+                          {actionLabel}
                         </Link>
                       </td>
                     </tr>

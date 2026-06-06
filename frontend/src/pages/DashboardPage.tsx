@@ -29,6 +29,7 @@ export function DashboardPage() {
   const tasksQuery = useQuery<ApiListResponse<Task>>({
     queryKey: ["dashboard-tasks"],
     queryFn: () => tasksAPI.list({ limit: 5, offset: 0 }),
+    enabled: !isCustomer,
   });
 
   const datasetsTotal = datasetsQuery.data?.total ?? datasetsQuery.data?.items?.length ?? 0;
@@ -95,8 +96,8 @@ export function DashboardPage() {
         {(isCustomer
           ? [
               { label: "Датасеты", value: datasetsTotal, icon: "📁", color: "from-blue-500 to-blue-600", link: "/datasets", description: "Всего датасетов" },
-              { label: "Задачи в работе", value: inProgressTasksCount, icon: "⏳", color: "from-yellow-500 to-yellow-600", link: "/tasks", description: "Активные задачи" },
-              { label: "Завершено", value: completedTasksCount, icon: "✅", color: "from-green-500 to-green-600", link: "/tasks", description: "Готовые задачи" },
+              { label: "Проекты", value: datasetsTotal, icon: "⏳", color: "from-yellow-500 to-yellow-600", link: "/projects", description: "Рабочие проекты" },
+              { label: "Качество", value: "Открыть", icon: "✅", color: "from-green-500 to-green-600", link: "/quality", description: "Контроль разметки" },
               { label: "Баланс", value: "0 ₽", icon: "💰", color: "from-purple-500 to-purple-600", link: "/finance", description: "Доступно средств" },
             ]
           : [
@@ -130,7 +131,7 @@ export function DashboardPage() {
           {(isCustomer
             ? [
                 { to: "/datasets", title: "Создать датасет", description: "Новый проект", icon: "📁", bg: "blue" },
-                { to: "/tasks", title: "Задачи", description: "Посмотреть все", icon: "✅", bg: "green" },
+                { to: "/projects", title: "Проекты", description: "Посмотреть все", icon: "✅", bg: "green" },
                 { to: "/finance", title: "Оплатить исполнителя", description: "Переводы и пополнение", icon: "💸", bg: "purple" },
               ]
             : [
@@ -155,6 +156,7 @@ export function DashboardPage() {
       </div>
 
       {/* Недавняя активность */}
+      {!isCustomer ? (
       <div className="card">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">📋 Недавняя активность</h2>
@@ -217,6 +219,7 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+      ) : null}
 
       {/* Начало работы */}
       <div className="card bg-gradient-to-br from-primary-50 to-secondary-50 dark:from-primary-900/20 dark:to-secondary-900/20 border-primary-200 dark:border-primary-800">
@@ -225,7 +228,7 @@ export function DashboardPage() {
           {(isCustomer
             ? [
                 { title: "Создайте первый датасет", description: "Добавьте датасет с описанием ваших данных", linkTo: "/datasets", linkLabel: "Добавьте датасет" },
-                { title: "Добавьте задачи для разметки", description: "Создайте задачи и настройте параметры аннотации", linkTo: "/tasks", linkLabel: "Создайте задачи" },
+                { title: "Настройте проект разметки", description: "Загрузите данные и настройте параметры аннотации", linkTo: "/projects", linkLabel: "Откройте проекты" },
                 { title: "Назначьте исполнителей", description: "Следите за прогрессом и качеством выполнения", linkTo: "/quality", linkLabel: "Откройте качество" },
               ]
             : [

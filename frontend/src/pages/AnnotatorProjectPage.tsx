@@ -61,6 +61,20 @@ export default function AnnotatorProjectPage() {
   const intervalValidationCount = (intervalValidationQuery.data?.items ?? []).filter((item: any) => item.project_id === project.project_id).length;
   const bboxValidationCount = (bboxValidationQuery.data?.items ?? []).filter((item: any) => item.project_id === project.project_id).length;
   const instructionsAcknowledged = project.instructions_bundle?.acknowledgement?.acknowledged ?? true;
+  const accessStatus = String(project.access_state?.status || "qualified");
+  const isInstructionRequired = accessStatus === "instruction_required";
+  const isQualificationRequired = accessStatus === "qualification_required";
+  const isRetrainingRequired = accessStatus === "retraining_required";
+  const canRequestAssignment =
+    instructionsAcknowledged &&
+    !isInstructionRequired &&
+    !isRetrainingRequired &&
+    (isQualificationRequired || Boolean(project.active_assignment_id || project.next_assignment_id));
+  const actionLabel = isQualificationRequired
+    ? "Пройти тестовые задания"
+    : isRetrainingRequired
+      ? "Повторить инструкцию"
+      : primaryActionLabel;
 
   return (
     <div className="space-y-6">
@@ -152,9 +166,9 @@ export default function AnnotatorProjectPage() {
                 type="button"
                 className="btn-primary mt-4 w-full"
                 onClick={() => nextAssignmentMutation.mutate()}
-                disabled={nextAssignmentMutation.isPending || !instructionsAcknowledged || (!project.active_assignment_id && !project.next_assignment_id)}
+                disabled={nextAssignmentMutation.isPending || !canRequestAssignment}
               >
-                {nextAssignmentMutation.isPending ? "Открываем..." : primaryActionLabel}
+                {nextAssignmentMutation.isPending ? "Открываем..." : actionLabel}
               </button>
             </div>
           ) : null}
@@ -180,15 +194,28 @@ export default function AnnotatorProjectPage() {
           <InstructionGate projectId={project.project_id} bundle={project.instructions_bundle} fallbackText={project.instructions} />
           <InstructionPanel projectId={project.project_id} bundle={project.instructions_bundle} fallbackText={project.instructions} autoOpen />
 
+          {isQualificationRequired ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
+              <div className="font-semibold">Перед разметкой нужно пройти тестовые задания</div>
+              <div className="mt-2 text-sm">Откройте тест: он проверит, что инструкция понята правильно.</div>
+            </div>
+          ) : null}
+          {isRetrainingRequired ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+              <div className="font-semibold">Нужно повторно прочитать инструкцию</div>
+              <div className="mt-2 text-sm">Контрольный пример был размечен неправильно. После подтверждения инструкции можно будет снова пройти тест.</div>
+            </div>
+          ) : null}
+
           {taskType === "bbox_annotation" ? (
             <div className="flex justify-end">
               <button
                 type="button"
                 className="btn-primary"
                 onClick={() => nextAssignmentMutation.mutate()}
-                disabled={nextAssignmentMutation.isPending || !instructionsAcknowledged || (!project.active_assignment_id && !project.next_assignment_id)}
+                disabled={nextAssignmentMutation.isPending || !canRequestAssignment}
               >
-                {nextAssignmentMutation.isPending ? "Открываем..." : primaryActionLabel}
+                {nextAssignmentMutation.isPending ? "Открываем..." : actionLabel}
               </button>
             </div>
           ) : null}

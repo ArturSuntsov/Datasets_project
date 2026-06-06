@@ -106,6 +106,11 @@ export default function CreateProjectPage() {
   const [frameInterval, setFrameInterval] = useState("1");
   const [assignmentsPerTask, setAssignmentsPerTask] = useState("2");
   const [agreementThreshold, setAgreementThreshold] = useState("0.75");
+  const [goldenPassThreshold, setGoldenPassThreshold] = useState("0.8");
+  const [goldenSampleRatio, setGoldenSampleRatio] = useState("0.3");
+  const [annotationGoldenRatio, setAnnotationGoldenRatio] = useState("0.3");
+  const [bboxRealItemsPerBatch, setBboxRealItemsPerBatch] = useState("20");
+  const [bboxGoldenItemsPerBatch, setBboxGoldenItemsPerBatch] = useState("10");
   const [specialization, setSpecialization] = useState("");
   const [groupRule, setGroupRule] = useState("");
   const [selectedAnnotators, setSelectedAnnotators] = useState<string[]>([]);
@@ -229,6 +234,12 @@ export default function CreateProjectPage() {
           group: groupRule,
           assignment_scope: selectedAnnotators.length ? "selected_only" : "all",
           quality_strategy: taskConfig.quality_strategy,
+          golden_pass_threshold: Number(goldenPassThreshold) || 0.8,
+          golden_min_score: Number(goldenPassThreshold) || 0.8,
+          golden_sample_ratio: Number(goldenSampleRatio) || 0.3,
+          annotation_golden_ratio: Number(annotationGoldenRatio) || 0.3,
+          bbox_real_items_per_batch: Number(bboxRealItemsPerBatch) || 20,
+          bbox_golden_items_per_batch: Number(bboxGoldenItemsPerBatch) || 10,
         },
         allowed_annotator_ids: selectedAnnotators,
         allowed_reviewer_ids: [],
@@ -558,6 +569,30 @@ export default function CreateProjectPage() {
             </div>
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
               Контроль качества: {qualityLabel(taskConfig?.quality_strategy)}
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Порог golden допуска</label>
+                <input type="number" step="0.05" min="0" max="1" className="input-field" value={goldenPassThreshold} onChange={(event) => setGoldenPassThreshold(event.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden для допуска</label>
+                <input type="number" step="0.05" min="0" max="1" className="input-field" value={goldenSampleRatio} onChange={(event) => setGoldenSampleRatio(event.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Hidden golden в разметке</label>
+                <input type="number" step="0.05" min="0" max="1" className="input-field" value={annotationGoldenRatio} onChange={(event) => setAnnotationGoldenRatio(event.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Реальные вопросы в validation-пакете</label>
+                <input type="number" step="1" min="1" className="input-field" value={bboxRealItemsPerBatch} onChange={(event) => setBboxRealItemsPerBatch(event.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden вопросы в validation-пакете</label>
+                <input type="number" step="1" min="0" className="input-field" value={bboxGoldenItemsPerBatch} onChange={(event) => setBboxGoldenItemsPerBatch(event.target.value)} />
+              </div>
             </div>
           </div>
         ) : null}

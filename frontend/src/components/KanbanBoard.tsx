@@ -2,11 +2,11 @@ import React from "react";
 import { Task, TaskStatus } from "../types";
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; icon: string; color: string }> = {
-  pending: { label: "Pending", icon: "P", color: "bg-gray-500" },
-  in_progress: { label: "In progress", icon: "W", color: "bg-yellow-500" },
-  review: { label: "Validation", icon: "V", color: "bg-blue-500" },
-  completed: { label: "Completed", icon: "C", color: "bg-green-500" },
-  rejected: { label: "Rejected", icon: "R", color: "bg-red-500" },
+  pending: { label: "Ожидает", icon: "P", color: "bg-gray-500" },
+  in_progress: { label: "В работе", icon: "W", color: "bg-yellow-500" },
+  review: { label: "На проверке", icon: "V", color: "bg-blue-500" },
+  completed: { label: "Завершено", icon: "C", color: "bg-green-500" },
+  rejected: { label: "Отклонено", icon: "R", color: "bg-red-500" },
 };
 
 const STATUSES: TaskStatus[] = ["pending", "in_progress", "review", "completed", "rejected"];
@@ -31,13 +31,13 @@ function TaskCard({ task, onDragStart }: { task: Task; onDragStart: (id: string)
       className={`group cursor-grab rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-all duration-200 active:cursor-grabbing dark:border-gray-700 dark:bg-gray-900 ${isDragging ? "scale-95 opacity-50" : "opacity-100 hover:shadow-md"}`}
     >
       <h4 className="mb-2 line-clamp-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-        {task.title || `Task #${task.id.slice(0, 6)}`}
+        {task.title || `Задача #${task.id.slice(0, 6)}`}
       </h4>
       <div className="mb-2 flex items-center justify-between">
         <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-gray-800">{task.id.slice(0, 8)}...</code>
         <span className={`text-[10px] font-medium ${difficultyColor}`}>{(task.difficulty_score * 100).toFixed(0)}%</span>
       </div>
-      <div className="mb-0.5 text-[11px] text-gray-500">Dataset</div>
+      <div className="mb-0.5 text-[11px] text-gray-500">Датасет</div>
       <code className="block truncate rounded bg-primary-50 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:bg-primary-900/20 dark:text-gray-300">
         {task.dataset_id.slice(0, 12)}...
       </code>
@@ -88,7 +88,7 @@ function KanbanColumn({
       <div className="min-h-[200px] flex-1 space-y-2 overflow-y-auto p-2">
         {tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-8 text-gray-500">
-            <span className="text-xs">No tasks</span>
+            <span className="text-xs">Нет задач</span>
           </div>
         ) : (
           tasks.map((task) => <TaskCard key={task.id} task={task} onDragStart={() => {}} />)

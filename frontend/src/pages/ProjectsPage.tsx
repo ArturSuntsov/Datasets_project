@@ -80,15 +80,15 @@ export default function ProjectsPage() {
     onError: async (err: unknown) => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       if (isAxiosError(err) && err.response?.status === 404) {
-        setDeleteError("Project is already unavailable. The list was refreshed.");
+        setDeleteError("Проект уже недоступен. Список обновлен.");
         return;
       }
-      setDeleteError("Could not delete the project. Check permissions and try again.");
+      setDeleteError("Не удалось удалить проект. Проверьте права доступа и попробуйте снова.");
     },
   });
 
   const handleDeleteProject = (projectId: string, projectTitle: string) => {
-    const confirmed = window.confirm(`Delete project "${projectTitle}"? This action cannot be undone.`);
+    const confirmed = window.confirm(`Удалить проект "${projectTitle}"? Это действие нельзя отменить.`);
     if (!confirmed) return;
     deleteProjectMutation.mutate(projectId);
   };
@@ -98,31 +98,31 @@ export default function ProjectsPage() {
       <div className="sticky top-16 z-20 -mx-2 space-y-4 bg-gray-50/95 px-2 py-2 backdrop-blur dark:bg-gray-900/95">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Projects</h1>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Проекты</h1>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              {user?.role === "annotator" ? "Assigned annotation projects" : "Create and monitor dataset projects"}
+              {user?.role === "annotator" ? "Назначенные проекты разметки" : "Создание и контроль проектов датасетов"}
             </p>
           </div>
           {canCreate ? (
             <Link to="/projects/create" className="btn-primary">
-              New project
+              Новый проект
             </Link>
           ) : null}
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <input className="input-field" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search title or description" />
+            <input className="input-field" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по названию или описанию" />
             <select className="input-field" value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="">All statuses</option>
+              <option value="">Все статусы</option>
               {STATUS_OPTIONS.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
             </select>
             <select className="input-field" value={taskType} onChange={(event) => setTaskType(event.target.value)}>
-              <option value="">All task types</option>
+              <option value="">Все типы задач</option>
               {TASK_TYPE_OPTIONS.map((item) => <option key={item} value={item}>{taskTypeLabel(item)}</option>)}
             </select>
             <select className="input-field" value={annotationType} onChange={(event) => setAnnotationType(event.target.value)}>
-              <option value="">All annotation types</option>
+              <option value="">Все типы разметки</option>
               {ANNOTATION_TYPE_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </div>
@@ -131,19 +131,19 @@ export default function ProjectsPage() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="flex min-h-[86px] flex-col justify-center rounded-lg border border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-950">
-          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Total</div>
+          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Всего</div>
           <div className="mt-2 text-2xl font-semibold leading-none text-gray-900 dark:text-white">{totals.all}</div>
         </div>
         <div className="flex min-h-[86px] flex-col justify-center rounded-lg border border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-950">
-          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Active on page</div>
+          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Активных на странице</div>
           <div className="mt-2 text-2xl font-semibold leading-none text-gray-900 dark:text-white">{totals.active}</div>
         </div>
         <div className="flex min-h-[86px] flex-col justify-center rounded-lg border border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-950">
-          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">CV on page</div>
+          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">CV на странице</div>
           <div className="mt-2 text-2xl font-semibold leading-none text-gray-900 dark:text-white">{totals.cv}</div>
         </div>
         <div className="flex min-h-[86px] flex-col justify-center rounded-lg border border-gray-200 bg-white px-5 py-4 dark:border-gray-800 dark:bg-gray-950">
-          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Closed on page</div>
+          <div className="whitespace-nowrap text-sm leading-5 text-gray-500 dark:text-gray-400">Закрытых на странице</div>
           <div className="mt-2 text-2xl font-semibold leading-none text-gray-900 dark:text-white">{totals.closed}</div>
         </div>
       </div>
@@ -157,13 +157,13 @@ export default function ProjectsPage() {
       {projectsQuery.isLoading ? (
         <div className="card flex flex-col items-center justify-center p-10">
           <LoadingSpinner size="lg" />
-          <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">Loading projects...</p>
+          <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">Загрузка проектов...</p>
         </div>
       ) : projects.length === 0 ? (
         <div className="card p-10 text-center">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">No projects found</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Проекты не найдены</h2>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {canCreate ? "Create a project or adjust filters." : "There are no available projects yet."}
+            {canCreate ? "Создайте проект или измените фильтры." : "Пока нет доступных проектов."}
           </p>
         </div>
       ) : (
@@ -172,13 +172,13 @@ export default function ProjectsPage() {
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
               <thead className="sticky top-0 z-10 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                 <tr>
-                  <th className="px-4 py-3">Project</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Labels</th>
-                  <th className="px-4 py-3">Executors</th>
-                  <th className="px-4 py-3">Updated</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="px-4 py-3">Проект</th>
+                  <th className="px-4 py-3">Статус</th>
+                  <th className="px-4 py-3">Тип</th>
+                  <th className="px-4 py-3">Метки</th>
+                  <th className="px-4 py-3">Исполнители</th>
+                  <th className="px-4 py-3">Обновлен</th>
+                  <th className="px-4 py-3 text-right">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
@@ -186,7 +186,7 @@ export default function ProjectsPage() {
                   <tr key={project.id} className="hover:bg-gray-50 dark:hover:bg-gray-900">
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900 dark:text-white">{project.title}</div>
-                      <div className="mt-1 max-w-md truncate text-xs text-gray-500 dark:text-gray-400">{project.description || "No description"}</div>
+                      <div className="mt-1 max-w-md truncate text-xs text-gray-500 dark:text-gray-400">{project.description || "Без описания"}</div>
                     </td>
                     <td className="px-4 py-3"><span className="badge badge-success">{statusLabel(project.status)}</span></td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
@@ -200,7 +200,7 @@ export default function ProjectsPage() {
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{formatDate(project.updated_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <Link className="btn-secondary" to={`/projects/${project.id}`}>Open</Link>
+                        <Link className="btn-secondary" to={`/projects/${project.id}`}>Открыть</Link>
                         {canCreate ? (
                           <button
                             type="button"
@@ -208,7 +208,7 @@ export default function ProjectsPage() {
                             disabled={deleteProjectMutation.isPending}
                             onClick={() => handleDeleteProject(project.id, project.title)}
                           >
-                            Delete
+                            Удалить
                           </button>
                         ) : null}
                       </div>
@@ -219,13 +219,13 @@ export default function ProjectsPage() {
             </table>
           </div>
           <div className="flex min-h-[68px] flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-300">
-            <div className="min-w-0 shrink break-words">Showing {pageStart}-{pageEnd} of {total}</div>
+            <div className="min-w-0 shrink break-words">Показано {pageStart}-{pageEnd} из {total}</div>
             <div className="flex shrink-0 gap-2">
               <button type="button" className="btn-secondary" disabled={offset === 0 || projectsQuery.isFetching} onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}>
-                Previous
+                Назад
               </button>
               <button type="button" className="btn-secondary" disabled={offset + PAGE_SIZE >= total || projectsQuery.isFetching} onClick={() => setOffset((current) => current + PAGE_SIZE)}>
-                Next
+                Вперед
               </button>
             </div>
           </div>

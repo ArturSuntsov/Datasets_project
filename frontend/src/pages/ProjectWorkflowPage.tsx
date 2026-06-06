@@ -9,9 +9,9 @@ import { useAuthStore } from "../store";
 const DEFAULT_LABEL_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04", "#4f46e5"];
 const TRACKING_ALGORITHMS = ["CSRT", "KCF", "MOSSE", "MIL", "MedianFlow", "TLD", "BOOSTING"] as const;
 const QUALITY_PRESETS = {
-  standard: { label: "Standard", hint: "Balanced speed, cost, and quality.", assignments: "2", agreement: "0.75", iou: "0.5", golden: "0.8", validators: "2", interval: "9" },
-  high_accuracy: { label: "High accuracy", hint: "More answers and stricter checks for critical datasets.", assignments: "3", agreement: "0.85", iou: "0.6", golden: "0.9", validators: "3", interval: "6" },
-  fast: { label: "Fast", hint: "Lower latency and cost with lighter quality gates.", assignments: "1", agreement: "0.65", iou: "0.45", golden: "0.75", validators: "1", interval: "12" },
+  standard: { label: "Стандарт", hint: "Баланс скорости, стоимости и качества.", assignments: "2", agreement: "0.75", iou: "0.5", golden: "0.8", validators: "2", goldenRatio: "0.3" },
+  high_accuracy: { label: "Высокая точность", hint: "Больше ответов и более строгие проверки для критичных датасетов.", assignments: "3", agreement: "0.85", iou: "0.6", golden: "0.9", validators: "3", goldenRatio: "0.4" },
+  fast: { label: "Быстро", hint: "Меньше задержка и стоимость, более легкие проверки качества.", assignments: "1", agreement: "0.65", iou: "0.45", golden: "0.75", validators: "1", goldenRatio: "0.2" },
 } as const;
 
 function splitLines(raw: string): string[] {
@@ -33,8 +33,8 @@ function ensureUniqueLabelNames(labels: ProjectLabel[]): { ok: boolean; error?: 
   const seen = new Set<string>();
   for (const label of labels) {
     const key = (label.name || "").trim().toLowerCase();
-    if (!key) return { ok: false, error: "Label name cannot be empty." };
-    if (seen.has(key)) return { ok: false, error: `Duplicate label name: ${label.name}` };
+    if (!key) return { ok: false, error: "Название метки не может быть пустым." };
+    if (seen.has(key)) return { ok: false, error: `Повторяется название метки: ${label.name}` };
     seen.add(key);
   }
   return { ok: true };
@@ -45,7 +45,7 @@ function ensureUniqueLabelColors(labels: ProjectLabel[]): { ok: boolean; error?:
   for (const label of labels) {
     const color = (label.color || "").trim().toLowerCase();
     if (!color) continue;
-    if (seen.has(color)) return { ok: false, error: `Duplicate label color: ${label.color}` };
+    if (seen.has(color)) return { ok: false, error: `Повторяется цвет метки: ${label.color}` };
     seen.add(color);
   }
   return { ok: true };
@@ -72,7 +72,10 @@ function normalizeParticipantRules(rules?: ProjectParticipantRules): Required<Pr
     bbox_validators_per_batch: Number(rules?.bbox_validators_per_batch ?? 3),
     bbox_real_items_per_batch: Number(rules?.bbox_real_items_per_batch ?? 20),
     bbox_golden_items_per_batch: Number(rules?.bbox_golden_items_per_batch ?? 10),
-    golden_min_score: Number(rules?.golden_min_score ?? 0.8),
+    golden_min_score: Number(rules?.golden_min_score ?? rules?.golden_pass_threshold ?? 0.8),
+    golden_pass_threshold: Number(rules?.golden_pass_threshold ?? rules?.golden_min_score ?? 0.8),
+    golden_sample_ratio: Number(rules?.golden_sample_ratio ?? 0.3),
+    annotation_golden_ratio: Number(rules?.annotation_golden_ratio ?? 0.3),
     golden_candidate_threshold: Number(rules?.golden_candidate_threshold ?? 0.9),
     golden_promotion_target: Number(rules?.golden_promotion_target ?? 10),
     annotation_golden_interval: Number(rules?.annotation_golden_interval ?? 9),
@@ -115,9 +118,9 @@ function ParticipantSelector({
             >
               <div className="font-medium text-gray-900 dark:text-white">{participant.username}</div>
               <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {participant.specialization || "No specialization"} | rating {participant.rating?.toFixed(2) ?? "0.00"}
+                {participant.specialization || "Без специализации"} | рейтинг {participant.rating?.toFixed(2) ?? "0.00"}
               </div>
-              {participant.group_name ? <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">group: {participant.group_name}</div> : null}
+              {participant.group_name ? <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">группа: {participant.group_name}</div> : null}
             </button>
           );
         })}
@@ -142,8 +145,10 @@ export default function ProjectWorkflowPage() {
   const [goldenMinScore, setGoldenMinScore] = useState("0.8");
   const [intervalValidators, setIntervalValidators] = useState("2");
   const [bboxValidators, setBBoxValidators] = useState("2");
+  const [bboxRealItems, setBBoxRealItems] = useState("20");
   const [bboxGoldenItems, setBBoxGoldenItems] = useState("10");
-  const [annotationGoldenInterval, setAnnotationGoldenInterval] = useState("9");
+  const [goldenSampleRatio, setGoldenSampleRatio] = useState("0.3");
+  const [annotationGoldenRatio, setAnnotationGoldenRatio] = useState("0.3");
   const [specialization, setSpecialization] = useState("");
   const [groupRule, setGroupRule] = useState("");
   const [assignmentScope, setAssignmentScope] = useState<Required<ProjectParticipantRules>["assignment_scope"]>("selected_only");
@@ -192,8 +197,10 @@ export default function ProjectWorkflowPage() {
     setGoldenMinScore(String(rules.golden_min_score));
     setIntervalValidators(String(rules.interval_validators_per_item));
     setBBoxValidators(String(rules.bbox_validators_per_batch));
+    setBBoxRealItems(String(rules.bbox_real_items_per_batch));
     setBBoxGoldenItems(String(rules.bbox_golden_items_per_batch));
-    setAnnotationGoldenInterval(String(rules.annotation_golden_interval));
+    setGoldenSampleRatio(String(rules.golden_sample_ratio));
+    setAnnotationGoldenRatio(String(rules.annotation_golden_ratio));
     setSpecialization(rules.specialization);
     setGroupRule(rules.group);
     setAssignmentScope(rules.assignment_scope);
@@ -219,11 +226,11 @@ export default function ProjectWorkflowPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error("Project id missing");
+      if (!projectId) throw new Error("Не найден ID проекта");
       const uniqueCheck = ensureUniqueLabelNames(labels);
-      if (!uniqueCheck.ok) throw new Error(uniqueCheck.error || "Invalid label schema");
+      if (!uniqueCheck.ok) throw new Error(uniqueCheck.error || "Некорректная схема меток");
       const uniqueColors = ensureUniqueLabelColors(labels);
-      if (!uniqueColors.ok) throw new Error(uniqueColors.error || "Invalid label colors");
+      if (!uniqueColors.ok) throw new Error(uniqueColors.error || "Некорректные цвета меток");
 
       return projectsAPI.update(projectId, {
         annotation_type: annotationType,
@@ -248,12 +255,15 @@ export default function ProjectWorkflowPage() {
           interval_annotators_per_chunk: Number(assignmentsPerTask) || 1,
           interval_validators_per_item: Number(intervalValidators) || 2,
           bbox_validators_per_batch: Number(bboxValidators) || 2,
-          bbox_real_items_per_batch: 20,
+          bbox_real_items_per_batch: Number(bboxRealItems) || 20,
           bbox_golden_items_per_batch: Number(bboxGoldenItems) || 10,
           golden_min_score: Number(goldenMinScore) || 0.8,
+          golden_pass_threshold: Number(goldenMinScore) || 0.8,
+          golden_sample_ratio: Number(goldenSampleRatio) || 0.3,
+          annotation_golden_ratio: Number(annotationGoldenRatio) || 0.3,
           golden_candidate_threshold: 0.9,
           golden_promotion_target: 10,
-          annotation_golden_interval: Number(annotationGoldenInterval) || 9,
+          annotation_golden_interval: Math.max(1, Math.round(1 / Math.max(Number(annotationGoldenRatio) || 0.3, 0.01))),
           interval_review_padding_sec: 3,
           stuck_assignment_ttl_minutes: 30,
         },
@@ -269,19 +279,19 @@ export default function ProjectWorkflowPage() {
       const rebalance = synced?.sync?.assignment_rebalance?.bbox_annotation || synced?.sync?.assignment_rebalance?.video_annotation;
       if (rebalance) {
         setDistributionResult(
-          `Workflow synced: redistributed ${rebalance.created || 0} assignments and removed ${rebalance.removed || 0} stale open assignments.`
+          `Workflow синхронизирован: создано ${rebalance.created || 0} назначений и удалено ${rebalance.removed || 0} устаревших открытых назначений.`
         );
       }
       await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Failed to save workflow settings");
+      setError(err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Не удалось сохранить настройки workflow");
     },
   });
 
   const importParticipantsMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId || !participantsCsv) throw new Error("Choose a CSV file first");
+      if (!projectId || !participantsCsv) throw new Error("Сначала выберите CSV-файл");
       return projectsAPI.importParticipantsCsv(projectId, participantsCsv);
     },
     onSuccess: async (result) => {
@@ -291,28 +301,28 @@ export default function ProjectWorkflowPage() {
       anchor.download = `project-${projectId}-participant-credentials.csv`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setDistributionResult("CSV import complete. Credentials file has been downloaded.");
+      setDistributionResult("CSV импорт завершен. Файл с учетными данными скачан.");
       await queryClient.invalidateQueries({ queryKey: ["participants", "annotator"] });
       await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || err?.message || "CSV import failed");
+      setError(err?.response?.data?.detail || err?.message || "CSV импорт не удался");
     },
   });
 
   const manualDistributeMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error("Project id missing");
+      if (!projectId) throw new Error("Не найден ID проекта");
       return projectsAPI.manualDistributeAssignments(projectId, selectedAnnotators, 100);
     },
     onSuccess: (result) => {
       setDistributionResult(
-        `Manual distribution complete: checked ${result.work_items_considered} items, created ${result.assignments_created} assignments.`
+        `Ручное распределение завершено: проверено ${result.work_items_considered} элементов, создано ${result.assignments_created} назначений.`
       );
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || err?.message || "Manual distribution failed");
+      setError(err?.response?.data?.detail || err?.message || "Ручное распределение не удалось");
     },
   });
 
@@ -329,7 +339,8 @@ export default function ProjectWorkflowPage() {
     setGoldenMinScore(preset.golden);
     setIntervalValidators(preset.validators);
     setBBoxValidators(preset.validators);
-    setAnnotationGoldenInterval(preset.interval);
+    setGoldenSampleRatio(preset.goldenRatio);
+    setAnnotationGoldenRatio(preset.goldenRatio);
   };
 
   const addLabel = () => setLabels((current) => [...current, { name: "", color: getDefaultLabelColor(current.length) }]);
@@ -346,10 +357,10 @@ export default function ProjectWorkflowPage() {
   if (!canEditProject(user?.role)) {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Workflow Settings</h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Only project owners and admins can edit workflow logic.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Настройки workflow</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Редактировать workflow могут только владельцы проекта и администраторы.</p>
         <Link to="/projects" className="btn-primary mt-5 inline-block">
-          Back to projects
+          К проектам
         </Link>
       </div>
     );
@@ -360,9 +371,9 @@ export default function ProjectWorkflowPage() {
   if (!projectQuery.data) {
     return (
       <div className="card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Project not found</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Проект не найден</h1>
         <Link to="/projects" className="btn-primary mt-5 inline-block">
-          Back to projects
+          К проектам
         </Link>
       </div>
     );
@@ -372,25 +383,25 @@ export default function ProjectWorkflowPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Projects / {projectQuery.data.title}</div>
-          <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">Workflow Settings</h1>
+          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Проекты / {projectQuery.data.title}</div>
+          <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">Настройки workflow</h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Configure labeling rules, AI pre-annotation, participant pools, and video processing for the end-to-end CV workflow.
+            Настройте правила разметки, AI предразметку, пулы исполнителей и обработку видео для полного CV workflow.
           </p>
         </div>
         <div className="flex gap-3">
           <button type="button" className="btn-secondary" onClick={() => navigate(`/projects/${projectId}`)}>
-            Back to project
+            К проекту
           </button>
           <button type="button" className="btn-primary" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? "Saving..." : "Save"}
+            {saveMutation.isPending ? "Сохраняем..." : "Сохранить"}
           </button>
         </div>
       </div>
 
       {hasWorkItems ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-          This project already has work items. Updating label rules or QC thresholds affects future imports and can make historical batches inconsistent.
+          В проекте уже есть рабочие элементы. Изменение правил меток или порогов качества повлияет на будущие импорты и может сделать старые пакеты несогласованными.
         </div>
       ) : null}
 
@@ -400,26 +411,26 @@ export default function ProjectWorkflowPage() {
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <div className="card space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Annotation type</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Тип разметки</label>
               <select className="input-field" value={annotationType} onChange={(e) => setAnnotationType(e.target.value as Project["annotation_type"])}>
                 <option value="bbox">BBox</option>
               </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">This release keeps the workflow focused on bounding boxes.</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">В этой версии workflow сфокусирован на bbox-разметке.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Frame interval, sec</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Интервал кадров, сек</label>
                 <input type="number" min="0.1" step="0.1" className="input-field" value={frameInterval} onChange={(e) => setFrameInterval(e.target.value)} />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Annotators per task</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Исполнителей на задание</label>
                 <input type="number" min="1" step="1" className="input-field" value={assignmentsPerTask} onChange={(e) => setAssignmentsPerTask(e.target.value)} />
               </div>
             </div>
 
             <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">Quality preset</div>
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Пресет качества</div>
               <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
                 {(Object.keys(QUALITY_PRESETS) as Array<keyof typeof QUALITY_PRESETS>).map((level) => (
                   <button
@@ -437,25 +448,33 @@ export default function ProjectWorkflowPage() {
               </div>
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden min score</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Порог прохождения golden</label>
                   <input type="number" min="0" max="1" step="0.05" className="input-field" value={goldenMinScore} onChange={(e) => setGoldenMinScore(e.target.value)} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Validators</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Валидаторы</label>
                   <input type="number" min="1" step="1" className="input-field" value={bboxValidators} onChange={(e) => setBBoxValidators(e.target.value)} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden interval</label>
-                  <input type="number" min="1" step="1" className="input-field" value={annotationGoldenInterval} onChange={(e) => setAnnotationGoldenInterval(e.target.value)} />
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Доля скрытых golden</label>
+                  <input type="number" min="0" max="1" step="0.05" className="input-field" value={annotationGoldenRatio} onChange={(e) => setAnnotationGoldenRatio(e.target.value)} />
                 </div>
               </div>
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Interval validators</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Валидаторы интервалов</label>
                   <input type="number" min="1" step="1" className="input-field" value={intervalValidators} onChange={(e) => setIntervalValidators(e.target.value)} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden cases per validation batch</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden для квалификации</label>
+                  <input type="number" min="0" max="1" step="0.05" className="input-field" value={goldenSampleRatio} onChange={(e) => setGoldenSampleRatio(e.target.value)} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Реальных кейсов в пакете валидации</label>
+                  <input type="number" min="1" step="1" className="input-field" value={bboxRealItems} onChange={(e) => setBBoxRealItems(e.target.value)} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Golden-кейсов в пакете валидации</label>
                   <input type="number" min="0" step="1" className="input-field" value={bboxGoldenItems} onChange={(e) => setBBoxGoldenItems(e.target.value)} />
                 </div>
               </div>
@@ -463,78 +482,78 @@ export default function ProjectWorkflowPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Agreement threshold</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Порог согласия</label>
                 <input type="number" min="0" max="1" step="0.05" className="input-field" value={agreementThreshold} onChange={(e) => setAgreementThreshold(e.target.value)} />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">IoU threshold</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Порог IoU</label>
                 <input type="number" min="0" max="1" step="0.05" className="input-field" value={iouThreshold} onChange={(e) => setIouThreshold(e.target.value)} />
               </div>
             </div>
 
             {projectQuery.data.task_type === "bbox_validation" || projectQuery.data.task_type === "video_interval_validation" ? (
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Validation input</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Источник валидации</label>
                 <select className="input-field" value={validationInputMode} onChange={(e) => setValidationInputMode(e.target.value as NonNullable<ProjectParticipantRules["validation_input_mode"]>)}>
-                  <option value="source_project">Source project</option>
-                  <option value="upload">Uploaded media + annotations</option>
+                  <option value="source_project">Исходный проект</option>
+                  <option value="upload">Загруженные медиа + разметка</option>
                 </select>
               </div>
             ) : null}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Required specialization</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Требуемая специализация</label>
                 <input className="input-field" value={specialization} onChange={(e) => setSpecialization(e.target.value)} placeholder="aerial vision" />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Required group</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Требуемая группа</label>
                 <input className="input-field" value={groupRule} onChange={(e) => setGroupRule(e.target.value)} placeholder="group-42" />
               </div>
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Assignment scope</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Область назначений</label>
               <select className="input-field" value={assignmentScope} onChange={(e) => setAssignmentScope(e.target.value as Required<ProjectParticipantRules>["assignment_scope"])}>
-                <option value="selected_only">Selected pool only</option>
-                <option value="all">All available annotators</option>
-                <option value="specialists">Prioritize matching specialization</option>
-                <option value="group_only">Only matching group</option>
+                <option value="selected_only">Только выбранный пул</option>
+                <option value="all">Все доступные исполнители</option>
+                <option value="specialists">Приоритет нужной специализации</option>
+                <option value="group_only">Только нужная группа</option>
               </select>
             </div>
 
             <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">AI pre-labeling</div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Seed bounding boxes automatically before annotators open the task.</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">AI предразметка</div>
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Автоматически добавлять стартовые bbox до открытия задания исполнителем.</div>
                 </div>
                 <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
-                  Enabled
+                  Включено
                 </label>
               </div>
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Model name</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Название модели</label>
                   <input className="input-field" value={aiModel} onChange={(e) => setAiModel(e.target.value)} disabled={!aiEnabled} placeholder="baseline-box-v1" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Confidence threshold</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Порог уверенности</label>
                   <input type="number" min="0" max="1" step="0.05" className="input-field" value={aiConfidenceThreshold} onChange={(e) => setAiConfidenceThreshold(e.target.value)} disabled={!aiEnabled} />
                 </div>
               </div>
             </div>
 
             <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">Video processing</div>
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Обработка видео</div>
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Keyframe interval</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Интервал ключевых кадров</label>
                   <input type="number" min="1" step="1" className="input-field" value={videoKeyframeInterval} onChange={(e) => setVideoKeyframeInterval(e.target.value)} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Tracking setting (baseline)</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Настройка трекинга (baseline)</label>
                   <select className="input-field" value={trackingAlgorithm} onChange={(e) => setTrackingAlgorithm(e.target.value as (typeof TRACKING_ALGORITHMS)[number])}>
                     {TRACKING_ALGORITHMS.map((algorithm) => (
                       <option key={algorithm} value={algorithm}>
@@ -543,26 +562,26 @@ export default function ProjectWorkflowPage() {
                     ))}
                   </select>
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Current backend uses baseline inter-frame checks; model tracking is not a production feature yet.
+                    Сейчас backend использует базовые межкадровые проверки; model tracking пока не является production-функцией.
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">Task packaging and validation prep</div>
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Упаковка заданий и подготовка валидации</div>
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Frames per task batch</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Кадров в пакете задания</label>
                   <input type="number" min="1" step="1" className="input-field" value={taskBatchSize} onChange={(e) => setTaskBatchSize(e.target.value)} />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Min consecutive frames</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Минимум последовательных кадров</label>
                   <input type="number" min="1" step="1" className="input-field" value={minSequenceSize} onChange={(e) => setMinSequenceSize(e.target.value)} />
                 </div>
               </div>
               <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                Based on the CV workflow document, batches are prepared in ordered frame groups so downstream inter-frame validation can work on neighboring frames.
+                Пакеты готовятся упорядоченными группами кадров, чтобы последующая межкадровая валидация работала с соседними кадрами.
               </div>
             </div>
           </div>
@@ -570,11 +589,11 @@ export default function ProjectWorkflowPage() {
           <div className="card space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-lg font-semibold text-gray-900 dark:text-white">Label schema</div>
-                <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">Define classes, colors, rules, and examples for annotators.</div>
+                <div className="text-lg font-semibold text-gray-900 dark:text-white">Схема меток</div>
+                <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">Задайте классы, цвета, правила и примеры для исполнителей.</div>
               </div>
               <button type="button" className="btn-secondary" onClick={addLabel}>
-                Add label
+                Добавить метку
               </button>
             </div>
 
@@ -583,16 +602,16 @@ export default function ProjectWorkflowPage() {
                 <div key={index} className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
                   <div className="flex gap-3">
                     <div className="flex-1">
-                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Name</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Название</label>
                       <input className="input-field" value={label.name} onChange={(e) => updateLabel(index, { name: e.target.value })} placeholder="drone" />
                     </div>
                     <button type="button" className="btn-secondary" onClick={() => removeLabel(index)} disabled={labels.length <= 1}>
-                      Remove
+                      Удалить
                     </button>
                   </div>
 
                   <div className="mt-3">
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Color</label>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Цвет</label>
                     <input
                       type="color"
                       className="h-10 w-20 rounded border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
@@ -602,28 +621,28 @@ export default function ProjectWorkflowPage() {
                   </div>
 
                   <div className="mt-3">
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Description</label>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Описание</label>
                     <input
                       className="input-field"
                       value={label.description ?? ""}
                       onChange={(e) => updateLabel(index, { description: e.target.value })}
-                      placeholder="What belongs to this class?"
+                      placeholder="Что относится к этому классу?"
                     />
                   </div>
 
                   <div className="mt-3">
-                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Rules</label>
+                    <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Правила</label>
                     <textarea
                       className="input-field min-h-[88px]"
                       value={joinLines(label.rules)}
                       onChange={(e) => updateLabel(index, { rules: splitLines(e.target.value) })}
-                      placeholder={"Draw a tight box\nMark all visible objects\nLeave a comment when uncertain"}
+                      placeholder={"Рисуйте плотную рамку\nРазмечайте все видимые объекты\nОставляйте комментарий при сомнении"}
                     />
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Good examples</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Хорошие примеры</label>
                       <textarea
                         className="input-field min-h-[88px]"
                         value={joinLines(label.examples?.good)}
@@ -635,11 +654,11 @@ export default function ProjectWorkflowPage() {
                             },
                           })
                         }
-                        placeholder={"Drone visible in full\nPartially occluded drone still recognizable"}
+                        placeholder={"Дрон виден полностью\nЧастично перекрытый дрон все еще распознается"}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Bad examples</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Плохие примеры</label>
                       <textarea
                         className="input-field min-h-[88px]"
                         value={joinLines(label.examples?.bad)}
@@ -651,7 +670,7 @@ export default function ProjectWorkflowPage() {
                             },
                           })
                         }
-                        placeholder={"Bird instead of drone\nBox too large and includes background"}
+                        placeholder={"Птица вместо дрона\nРамка слишком большая и захватывает фон"}
                       />
                     </div>
                   </div>
@@ -660,7 +679,7 @@ export default function ProjectWorkflowPage() {
             </div>
 
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-              <div className="text-xs font-medium text-gray-600 dark:text-gray-400">Palette preview</div>
+              <div className="text-xs font-medium text-gray-600 dark:text-gray-400">Предпросмотр палитры</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {labels.map((label, index) => (
                   <div key={`palette-${index}`} className="flex items-center gap-2 rounded bg-gray-100 px-2 py-1 text-xs dark:bg-gray-900">
@@ -675,15 +694,15 @@ export default function ProjectWorkflowPage() {
 
         <div className="card space-y-5">
           <ParticipantSelector
-            title="Annotator pool"
-            hint="Only people selected here can be used when assignment scope is set to the selected pool."
+            title="Пул исполнителей"
+            hint="Если выбрана область назначений «только выбранный пул», задания получат только отмеченные исполнители."
             items={annotatorsQuery.data?.items ?? []}
             selected={selectedAnnotators}
             onToggle={(id) => toggle(id, selectedAnnotators, setSelectedAnnotators)}
           />
 
           <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Bulk import participants from CSV</div>
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Массовый импорт участников из CSV</div>
             <input type="file" accept=".csv" className="mt-2 block w-full text-sm" onChange={(e) => setParticipantsCsv(e.target.files?.[0] ?? null)} />
             <button
               type="button"
@@ -691,20 +710,20 @@ export default function ProjectWorkflowPage() {
               onClick={() => importParticipantsMutation.mutate()}
               disabled={!participantsCsv || importParticipantsMutation.isPending}
             >
-              {importParticipantsMutation.isPending ? "Importing..." : "Import CSV"}
+              {importParticipantsMutation.isPending ? "Импортируем..." : "Импорт CSV"}
             </button>
           </div>
 
           <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Manual assignment distribution</div>
-            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Useful when you want to push pending tasks to a specific subset immediately.</div>
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Ручное распределение назначений</div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Полезно, если нужно сразу выдать ожидающие задания выбранной группе исполнителей.</div>
             <button
               type="button"
               className="btn-secondary mt-3"
               onClick={() => manualDistributeMutation.mutate()}
               disabled={selectedAnnotators.length === 0 || manualDistributeMutation.isPending}
             >
-              {manualDistributeMutation.isPending ? "Distributing..." : "Distribute pending tasks"}
+              {manualDistributeMutation.isPending ? "Распределяем..." : "Распределить ожидающие задания"}
             </button>
           </div>
 
@@ -713,10 +732,10 @@ export default function ProjectWorkflowPage() {
 
         <div className="flex justify-end gap-3">
           <button type="button" className="btn-secondary" onClick={() => navigate(`/projects/${projectId}`)}>
-            Cancel
+            Отмена
           </button>
           <button type="submit" className="btn-primary" disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? "Saving..." : "Save workflow settings"}
+            {saveMutation.isPending ? "Сохраняем..." : "Сохранить настройки workflow"}
           </button>
         </div>
       </form>

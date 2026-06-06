@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { annotatorAPI } from "../services/api";
+import { useAuthStore } from "../store";
 import type { InstructionAsset, InstructionBundle } from "../types";
 
 type InstructionPanelProps = {
@@ -30,8 +31,51 @@ function isHtmlInstruction(asset: InstructionAsset) {
   return value.includes(".html") || value.includes(".htm");
 }
 
+function dedupeAssets(assets: InstructionAsset[]) {
+  const seen = new Set<string>();
+  return assets.filter((asset) => {
+    const key = asset.file_uri || asset.url || `${asset.asset_type}:${asset.file_name || asset.title || asset.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function ExampleImage({ asset }: { asset: InstructionAsset }) {
+  const boxes = Array.isArray((asset.label_data as any)?.boxes)
+    ? ((asset.label_data as any).boxes as Array<Record<string, unknown>>)
+    : [];
+  const width = Math.max(Number((asset.label_data as any)?.width || 1), 1);
+  const height = Math.max(Number((asset.label_data as any)?.height || 1), 1);
+  if (!asset.file_uri || !boxes.length) return null;
+  return (
+    <div className="mt-3 overflow-hidden rounded-md border border-gray-200 bg-gray-950 dark:border-gray-800">
+      <div className="relative mx-auto max-h-80 w-full max-w-3xl">
+        <img src={asset.file_uri} alt={asset.title || "instruction example"} className="block h-auto max-h-80 w-full object-contain" />
+        {boxes.map((box, index) => (
+          <div
+            key={`${asset.id}-${index}`}
+            className="absolute border-2 border-emerald-400"
+            style={{
+              left: `${(Number(box.x || 0) / width) * 100}%`,
+              top: `${(Number(box.y || 0) / height) * 100}%`,
+              width: `${(Number(box.width || 0) / width) * 100}%`,
+              height: `${(Number(box.height || 0) / height) * 100}%`,
+              borderColor: asset.asset_type === "bad_example" ? "#f87171" : "#34d399",
+              boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
+            }}
+          >
+            {box.label ? <span className="absolute -top-6 left-0 rounded bg-black/80 px-2 py-0.5 text-xs text-white">{String(box.label)}</span> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AssetItem({ asset, projectId }: { asset: InstructionAsset; projectId?: string }) {
-  const labelData = Object.keys(asset.label_data || {}).length ? JSON.stringify(asset.label_data, null, 2) : "";
+  const hasVisualLabels = Boolean(asset.file_uri && Array.isArray((asset.label_data as any)?.boxes) && (asset.label_data as any).boxes.length);
+  const labelData = !hasVisualLabels && Object.keys(asset.label_data || {}).length ? JSON.stringify(asset.label_data, null, 2) : "";
   return (
     <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -39,16 +83,17 @@ function AssetItem({ asset, projectId }: { asset: InstructionAsset; projectId?: 
         <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-900 dark:text-gray-300">{assetKindLabel(asset)}</span>
       </div>
       {asset.body ? <div className="mt-2 whitespace-pre-wrap text-gray-700 dark:text-gray-300">{asset.body}</div> : null}
+      <ExampleImage asset={asset} />
       {asset.url ? (
         <a className="mt-2 inline-block text-blue-600 hover:underline dark:text-blue-400" href={asset.url} target="_blank" rel="noreferrer">
           Открыть ссылку
         </a>
       ) : null}
-      {asset.file_uri && isHtmlInstruction(asset) && projectId ? (
-        <Link className="mt-2 inline-block text-blue-600 hover:underline dark:text-blue-400" to={`/projects/${projectId}/instructions`}>
-          Open instruction page
-        </Link>
-      ) : asset.file_uri ? (
+      {asset.file_uri && isHtmlInstruction(asset) ? (
+        <a className="mt-2 inline-block text-blue-600 hover:underline dark:text-blue-400" href={asset.file_uri} target="_blank" rel="noreferrer">
+          Открыть инструкцию в новой вкладке
+        </a>
+      ) : asset.file_uri && !hasVisualLabels ? (
         <a className="mt-2 inline-block text-blue-600 hover:underline dark:text-blue-400" href={asset.file_uri} target="_blank" rel="noreferrer">
           {asset.file_name || "Открыть файл"}
         </a>
@@ -60,11 +105,13 @@ function AssetItem({ asset, projectId }: { asset: InstructionAsset; projectId?: 
 
 export function InstructionPanel({ projectId, bundle, fallbackText = "", compact = false, autoOpen = false, buttonLabel }: InstructionPanelProps) {
   const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
   const [open, setOpen] = useState(false);
-  const assets = bundle?.assets ?? [];
+  const assets = useMemo(() => dedupeAssets(bundle?.assets ?? []), [bundle?.assets]);
   const instructions = bundle?.instructions ?? fallbackText;
   const acknowledged = Boolean(bundle?.acknowledgement?.acknowledged);
   const hasContent = Boolean(bundle || instructions || assets.length);
+  const canManageExamples = user?.role === "customer" || user?.role === "admin";
 
   const groupedAssets = useMemo(() => {
     const good = assets.filter((asset) => asset.asset_type === "good_example" || asset.asset_type === "annotated_example");
@@ -146,6 +193,16 @@ export function InstructionPanel({ projectId, bundle, fallbackText = "", compact
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-red-700 dark:text-red-300">Плохая разметка</div>
                   {groupedAssets.bad.map((asset) => <AssetItem key={asset.id} asset={asset} projectId={projectId} />)}
+                </div>
+              ) : null}
+              {!groupedAssets.good.length && !groupedAssets.bad.length && projectId ? (
+                <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                  <div className="font-medium text-gray-900 dark:text-white">Примеры разметки ещё не добавлены</div>
+                  {canManageExamples ? (
+                    <Link className="btn-secondary mt-3 inline-block" to={`/projects/${projectId}/golden`}>
+                      Создать примеры Golden dataset
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
               {ackMutation.isError ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">Не удалось сохранить подтверждение.</div> : null}

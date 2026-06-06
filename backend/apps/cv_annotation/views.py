@@ -940,6 +940,8 @@ class AnnotatorProjectsView(AuthenticatedAPIView):
             bucket = grouped[project_id][stage]
             if last_activity_at and last_activity_at > bucket["last_activity_at"]:
                 bucket["last_activity_at"] = last_activity_at
+            if user.role == User.ROLE_ANNOTATOR:
+                bucket["access_state"] = project_user_access_state(project, user)
             return bucket
 
         if user.role == User.ROLE_ANNOTATOR:
@@ -1211,6 +1213,7 @@ class AnnotatorProjectDetailView(AuthenticatedAPIView):
                 "bbox_validation_agreement": (overview.get("bbox_validation") or {}).get("average_agreement", 0.0),
             },
             "workflow": overview.get("work_items", {}),
+            "access_state": project_user_access_state(project, user) if user.role == User.ROLE_ANNOTATOR else {"status": "qualified"},
             "next_assignment_id": str(next_assignment.id) if next_assignment else None,
             "active_assignment_id": str(active_assignment.id) if active_assignment else None,
         }
@@ -1249,6 +1252,8 @@ class AnnotatorProjectNextAssignmentView(AuthenticatedAPIView):
         if user.role not in (User.ROLE_ANNOTATOR, User.ROLE_ADMIN):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         _recover_stuck_assignments(project)
+        access_state = project_user_access_state(project, user)
+        force_qualification = access_state.get("status") == "qualification_required"
         gate = self.access_gate_response(project, user, allow_qualification=True)
         if gate:
             return gate
@@ -1259,7 +1264,7 @@ class AnnotatorProjectNextAssignmentView(AuthenticatedAPIView):
             else Assignment.objects(project=project).order_by("queue_position", "created_at")
         )
         active_assignment = next((item for item in assignments if item.status in [Assignment.STATUS_IN_PROGRESS, Assignment.STATUS_DRAFT]), None)
-        if active_assignment:
+        if active_assignment and not force_qualification:
             return Response({"assignment_id": str(active_assignment.id), "source": "active"}, status=status.HTTP_200_OK)
 
         golden_assignment = maybe_create_hidden_golden_assignment(project, user)
@@ -1387,6 +1392,9 @@ class AnnotatorAssignmentSubmitView(AuthenticatedAPIView):
                     "assignment_status": golden_assignment.status,
                     "annotation_status": "submitted" if attempt else "draft",
                     "evaluation": evaluation,
+                    "golden_passed": (evaluation or {}).get("metrics", {}).get("passed"),
+                    "access_status": (evaluation or {}).get("metrics", {}).get("access_status"),
+                    "rejected_real_assignments": (evaluation or {}).get("metrics", {}).get("rejected_real_assignments", 0),
                 },
                 status=status.HTTP_200_OK,
             )

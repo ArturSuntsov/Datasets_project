@@ -16,7 +16,7 @@ from bson import ObjectId
 from mongoengine import Q
 
 from apps.projects.models import Project, ProjectMembership
-from apps.projects.services.instructions import latest_acknowledgement
+from apps.projects.services.instructions import instruction_bundle, latest_acknowledgement
 from apps.projects.task_registry import (
     TASK_BBOX_ANNOTATION,
     TASK_BBOX_VALIDATION,
@@ -122,6 +122,8 @@ DEFAULT_BBOX_VALIDATORS_PER_BATCH = 3
 DEFAULT_BBOX_REAL_ITEMS_PER_BATCH = 20
 DEFAULT_BBOX_GOLDEN_ITEMS_PER_BATCH = 10
 DEFAULT_GOLDEN_MIN_SCORE = 0.8
+DEFAULT_GOLDEN_SAMPLE_RATIO = 0.3
+DEFAULT_ANNOTATION_GOLDEN_RATIO = 0.3
 DEFAULT_VIDEO_CHUNK_DURATION_SEC = 45
 DEFAULT_VIDEO_CHUNK_MIN_DURATION_SEC = 30
 DEFAULT_VIDEO_CHUNK_MAX_DURATION_SEC = 60
@@ -150,6 +152,12 @@ def _float_rule(project: Project, key: str, default: float, minimum: float = 0.0
 
 
 def workflow_runtime_settings(project: Project) -> dict:
+    golden_pass_threshold = _float_rule(project, "golden_pass_threshold", _float_rule(project, "golden_min_score", DEFAULT_GOLDEN_MIN_SCORE))
+    annotation_golden_ratio = _float_rule(project, "annotation_golden_ratio", DEFAULT_ANNOTATION_GOLDEN_RATIO)
+    if "annotation_golden_ratio" in (project.participant_rules or {}):
+        annotation_interval = max(1, int(round(1.0 / max(annotation_golden_ratio, 0.01))))
+    else:
+        annotation_interval = _int_rule(project, "annotation_golden_interval", DEFAULT_ANNOTATION_GOLDEN_INTERVAL)
     return {
         "interval_annotators_per_chunk": _int_rule(
             project,
@@ -160,12 +168,15 @@ def workflow_runtime_settings(project: Project) -> dict:
         "bbox_validators_per_batch": _int_rule(project, "bbox_validators_per_batch", DEFAULT_BBOX_VALIDATORS_PER_BATCH),
         "bbox_real_items_per_batch": _int_rule(project, "bbox_real_items_per_batch", DEFAULT_BBOX_REAL_ITEMS_PER_BATCH),
         "bbox_golden_items_per_batch": _int_rule(project, "bbox_golden_items_per_batch", DEFAULT_BBOX_GOLDEN_ITEMS_PER_BATCH),
-        "golden_min_score": _float_rule(project, "golden_min_score", DEFAULT_GOLDEN_MIN_SCORE),
+        "golden_min_score": golden_pass_threshold,
+        "golden_pass_threshold": golden_pass_threshold,
+        "golden_sample_ratio": _float_rule(project, "golden_sample_ratio", DEFAULT_GOLDEN_SAMPLE_RATIO),
         "video_chunk_duration_sec": _int_rule(project, "video_chunk_duration_sec", DEFAULT_VIDEO_CHUNK_DURATION_SEC),
         "video_chunk_min_duration_sec": _int_rule(project, "video_chunk_min_duration_sec", DEFAULT_VIDEO_CHUNK_MIN_DURATION_SEC),
         "video_chunk_max_duration_sec": _int_rule(project, "video_chunk_max_duration_sec", DEFAULT_VIDEO_CHUNK_MAX_DURATION_SEC),
         "interval_review_padding_sec": _float_rule(project, "interval_review_padding_sec", DEFAULT_INTERVAL_REVIEW_PADDING_SEC, minimum=0.0, maximum=30.0),
-        "annotation_golden_interval": _int_rule(project, "annotation_golden_interval", DEFAULT_ANNOTATION_GOLDEN_INTERVAL),
+        "annotation_golden_ratio": annotation_golden_ratio,
+        "annotation_golden_interval": annotation_interval,
         "stuck_assignment_ttl_minutes": _int_rule(project, "stuck_assignment_ttl_minutes", DEFAULT_STUCK_ASSIGNMENT_TTL_MINUTES),
         "golden_candidate_threshold": _float_rule(project, "golden_candidate_threshold", DEFAULT_GOLDEN_CANDIDATE_THRESHOLD),
         "golden_promotion_target": _int_rule(project, "golden_promotion_target", DEFAULT_GOLDEN_PROMOTION_TARGET),
@@ -205,8 +216,29 @@ def _access_membership(project: Project, user: User) -> ProjectMembership | None
     return ProjectMembership.objects(project=project, user=user, role=ProjectMembership.ROLE_ANNOTATOR, is_active=True).first()
 
 
+def _active_control_golden_frames(project: Project, *, include_negative: bool = True) -> list[GoldenFrame]:
+    frames = list(
+        GoldenFrame.objects(
+            project=project,
+            status=GoldenFrame.STATUS_ACTIVE,
+            usage__in=[GoldenFrame.USAGE_CONTROL, GoldenFrame.USAGE_BOTH],
+        )
+    )
+    if include_negative:
+        return frames
+    return [item for item in frames if (item.case_type or GoldenFrame.CASE_POSITIVE) == GoldenFrame.CASE_POSITIVE]
+
+
 def _active_golden_count(project: Project) -> int:
-    return GoldenFrame.objects(project=project, status=GoldenFrame.STATUS_ACTIVE).count()
+    return len(_active_control_golden_frames(project, include_negative=False))
+
+
+def _qualification_target_count(project: Project) -> int:
+    active_count = _active_golden_count(project)
+    if active_count <= 0:
+        return 0
+    ratio = workflow_runtime_settings(project)["golden_sample_ratio"]
+    return max(1, min(active_count, int(round(active_count * ratio))))
 
 
 def _save_access_metadata(membership: ProjectMembership, **updates) -> dict:
@@ -292,17 +324,39 @@ def record_golden_access_result(project: Project, user: User, *, score: float, p
     version = int(getattr(project, "instructions_version", 0) or 0)
     metadata = dict(getattr(membership, "metadata", {}) or {})
     was_qualified = metadata.get("qualification_status") in {ACCESS_QUALIFIED, ACCESS_WARNING}
+    target_count = _qualification_target_count(project)
     if passed:
+        if not was_qualified and target_count > 1:
+            passed_attempts = GoldenAttempt.objects(
+                project=project,
+                user=user,
+                stage=GoldenAttempt.STAGE_ANNOTATION,
+                passed=True,
+            ).count()
+            aggregate_score = round(min(1.0, passed_attempts / target_count), 4)
+            if passed_attempts < target_count:
+                return _save_access_metadata(
+                    membership,
+                    qualification_status=ACCESS_QUALIFICATION_REQUIRED,
+                    qualified_instructions_version=version,
+                    qualification_score=aggregate_score,
+                    qualification_passed_count=passed_attempts,
+                    qualification_target_count=target_count,
+                    warning_count=0,
+                    last_golden_passed_at=datetime.utcnow().isoformat(),
+                )
         return _save_access_metadata(
             membership,
             qualification_status=ACCESS_QUALIFIED,
             qualified_instructions_version=version,
             qualification_score=round(float(score or 0.0), 4),
+            qualification_passed_count=max(1, int(metadata.get("qualification_passed_count") or 0) + 1),
+            qualification_target_count=target_count or 1,
             warning_count=0,
             last_golden_passed_at=datetime.utcnow().isoformat(),
         )
     warning_count = int(metadata.get("warning_count") or 0) + 1
-    next_status = ACCESS_RETRAINING_REQUIRED if was_qualified and warning_count >= 2 else ACCESS_WARNING if was_qualified else ACCESS_QUALIFICATION_REQUIRED
+    next_status = ACCESS_RETRAINING_REQUIRED if was_qualified else ACCESS_QUALIFICATION_REQUIRED
     return _save_access_metadata(
         membership,
         qualification_status=next_status,
@@ -310,6 +364,22 @@ def record_golden_access_result(project: Project, user: User, *, score: float, p
         warning_count=warning_count,
         last_golden_failed_at=datetime.utcnow().isoformat(),
         retraining_required_at=datetime.utcnow().isoformat() if next_status == ACCESS_RETRAINING_REQUIRED else "",
+    )
+
+
+def mark_retraining_required(project: Project, user: User, *, score: float = 0.0, reason: str = "hidden_golden_failed") -> dict:
+    membership = _access_membership(project, user)
+    if not membership:
+        return {}
+    warning_count = int((membership.metadata or {}).get("warning_count") or 0) + 1
+    return _save_access_metadata(
+        membership,
+        qualification_status=ACCESS_RETRAINING_REQUIRED,
+        qualification_score=round(float(score or 0.0), 4),
+        warning_count=warning_count,
+        last_golden_failed_at=datetime.utcnow().isoformat(),
+        retraining_required_at=datetime.utcnow().isoformat(),
+        retraining_reason=reason,
     )
 
 
@@ -1435,12 +1505,6 @@ def select_annotators_for_project(project: Project, limit: int, stage: str | Non
     if stage_pool_ids:
         memberships = [membership for membership in memberships if str(membership.user.id) in stage_pool_ids]
 
-    memberships = [
-        membership
-        for membership in memberships
-        if project_user_access_state(project, membership.user).get("status") in {ACCESS_QUALIFIED, ACCESS_WARNING}
-    ]
-
     def open_load(user: User) -> int:
         return Assignment.objects(
             annotator=user,
@@ -2565,8 +2629,10 @@ def _golden_diversity_bucket(frame: FrameItem) -> str:
 
 
 def _active_golden_frames(project: Project, limit: int | None = None, include_negative: bool = True) -> List[GoldenFrame]:
-    query = GoldenFrame.objects(project=project, status=GoldenFrame.STATUS_ACTIVE).order_by("annotation_seen", "validation_seen", "-candidate_score", "-created_at")
-    items = list(query)
+    items = sorted(
+        _active_control_golden_frames(project, include_negative=include_negative),
+        key=lambda item: (int(item.annotation_seen or 0), int(item.validation_seen or 0), -float(item.candidate_score or 0.0), item.created_at),
+    )
     if not include_negative:
         items = [item for item in items if (item.case_type or GoldenFrame.CASE_POSITIVE) == GoldenFrame.CASE_POSITIVE]
     if not limit:
@@ -3145,7 +3211,19 @@ def submit_bbox_validation_assignment(
     assignment.status = BBoxValidationAssignment.STATUS_SUBMITTED
     assignment.save()
     if golden_total and score < required_min_score:
-        return {"assignment_id": str(assignment.id), "status": "rejected_by_golden", "golden_score": score, "golden_total": golden_total}
+        access_metadata = mark_retraining_required(
+            assignment.project,
+            assignment.validator,
+            score=score,
+            reason="bbox_validation_hidden_golden_failed",
+        )
+        return {
+            "assignment_id": str(assignment.id),
+            "status": "rejected_by_golden",
+            "golden_score": score,
+            "golden_total": golden_total,
+            "access_status": access_metadata.get("qualification_status"),
+        }
     approved_count = 0
     requeued_count = 0
     pending_count = 0
@@ -3535,7 +3613,8 @@ def maybe_create_hidden_golden_assignment(project: Project, annotator: User) -> 
         str(attempt.golden_frame.id)
         for attempt in GoldenAttempt.objects(project=project, user=annotator, stage=GoldenAttempt.STAGE_ANNOTATION)
     }
-    eligible = [golden for golden in _active_golden_frames(project, include_negative=False) if str(golden.id) not in attempted_ids]
+    active_control = _active_control_golden_frames(project, include_negative=False)
+    eligible = active_control if force_qualification else [golden for golden in active_control if str(golden.id) not in attempted_ids]
     if not eligible:
         return None
     golden = sorted(eligible, key=lambda item: (int(item.annotation_seen or 0), -float(item.candidate_score or 0.0), str(item.id)))[0]
@@ -3570,6 +3649,7 @@ def golden_annotation_assignment_payload(assignment: GoldenAnnotationAssignment)
         "status": assignment.status,
         "queue_position": None,
         "instructions": assignment.project.instructions,
+        "instructions_bundle": instruction_bundle(assignment.project, assignment.annotator),
         "label_schema": assignment.project.label_schema or [],
         "workflow_meta": {},
         "task_batch": {"task_batch_id": "", "items": [], "current_index": 0, "total": 0},
@@ -3601,7 +3681,7 @@ def submit_golden_annotation_assignment(
     golden = assignment.golden_frame
     comparison = compare_bbox_annotations(golden.reference_annotation, label_data, assignment.project.iou_threshold)
     score = float(comparison.get("quality_score", comparison.get("f1", 0.0)) or 0.0)
-    pass_threshold = max(float(assignment.project.agreement_threshold or 0.0), 0.8)
+    pass_threshold = workflow_runtime_settings(assignment.project)["golden_pass_threshold"]
     passed = score >= pass_threshold
     attempt = GoldenAttempt(
         project=assignment.project,
@@ -3645,6 +3725,7 @@ def submit_golden_annotation_assignment(
 def _reject_recent_real_assignments_after_failed_golden(project: Project, annotator: User, failed_at: datetime) -> int:
     settings = workflow_runtime_settings(project)
     interval = max(1, int(settings["annotation_golden_interval"] or DEFAULT_ANNOTATION_GOLDEN_INTERVAL))
+    batch_size = int(_workflow_settings(project).get("task_batch_size") or interval)
     previous_attempt = (
         GoldenAttempt.objects(project=project, user=annotator, stage=GoldenAttempt.STAGE_ANNOTATION, created_at__lt=failed_at)
         .order_by("-created_at")
@@ -3657,8 +3738,24 @@ def _reject_recent_real_assignments_after_failed_golden(project: Project, annota
     ).order_by("-submitted_at", "-updated_at")
     if previous_attempt:
         query = query.filter(submitted_at__gt=previous_attempt.created_at)
+    recent_assignments = list(query.limit(max(interval, batch_size)))
+    recent_batch_id = ""
+    for item in recent_assignments:
+        recent_batch_id = str((item.work_item.workflow_meta or {}).get("task_batch_id") or "")
+        if recent_batch_id:
+            break
+    if recent_batch_id:
+        batch_items = _batch_work_items(project, recent_batch_id)
+        query = Assignment.objects(
+            project=project,
+            annotator=annotator,
+            work_item__in=batch_items,
+            status__in=[Assignment.STATUS_SUBMITTED, Assignment.STATUS_ACCEPTED],
+        ).order_by("-submitted_at", "-updated_at")
+        if previous_attempt:
+            query = query.filter(submitted_at__gt=previous_attempt.created_at)
     rejected = 0
-    for assignment in list(query.limit(interval)):
+    for assignment in list(query.limit(max(interval, batch_size))):
         annotation = WorkAnnotation.objects(assignment=assignment).first()
         if annotation:
             annotation.status = WorkAnnotation.STATUS_REJECTED
@@ -3667,7 +3764,9 @@ def _reject_recent_real_assignments_after_failed_golden(project: Project, annota
         assignment.quality_signals = {
             **(assignment.quality_signals or {}),
             "rejected_by_golden": True,
+            "invalidated_by_golden": True,
             "golden_failed_at": failed_at.isoformat(),
+            "invalidated_task_batch_id": recent_batch_id,
         }
         assignment.save()
         work_item = assignment.work_item

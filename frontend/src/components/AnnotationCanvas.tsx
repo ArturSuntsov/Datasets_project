@@ -6,7 +6,7 @@ import {
   Stage,
   Text,
 } from "react-konva";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BoundingBox, ProjectLabel } from "../types";
 
 function useImageLoader(url: string) {
@@ -96,26 +96,42 @@ function HotkeysHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
-export default function AnnotationCanvas({
-  imageUrl,
-  value,
-  labels,
-  currentLabel,
-  selectedBoxIndex,
-  onSelectedBoxIndexChange,
-  onBoxesChange,
-}: {
+export type AnnotationCanvasHandle = {
+  setDrawTool: () => void;
+  setPanTool: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetView: () => void;
+};
+
+type AnnotationCanvasProps = {
   imageUrl: string;
   value: BoundingBox[];
   labels: ProjectLabel[];
   currentLabel: string;
   selectedBoxIndex: number | null;
+  fitPadding?: number;
+  showBackdrop?: boolean;
+  stageToImage?: boolean;
   onSelectedBoxIndexChange: (index: number | null) => void;
   onBoxesChange: (boxes: BoundingBox[]) => void;
-}) {
+};
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCanvasProps>(function AnnotationCanvas({
+  imageUrl,
+  value,
+  labels,
+  currentLabel,
+  selectedBoxIndex,
+  fitPadding = 0,
+  showBackdrop = true,
+  stageToImage = false,
+  onSelectedBoxIndexChange,
+  onBoxesChange,
+}, ref) {
   const stageRef = useRef<any>(null);
   const contentRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -129,7 +145,7 @@ export default function AnnotationCanvas({
   const [tool, setTool] = useState<"draw" | "pan">("draw");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [viewportWidth, setViewportWidth] = useState(1100);
+  const [viewportWidth, setViewportWidth] = useState(1280);
   const [viewportHeight, setViewportHeight] = useState(760);
   const [showHotkeys, setShowHotkeys] = useState(false);
 
@@ -166,21 +182,31 @@ export default function AnnotationCanvas({
   );
 
   // ---- Viewport resize ----
-  useEffect(() => {
-    if (!containerRef.current) return;
+  useLayoutEffect(() => {
     const updateSize = () => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect?.width || containerRef.current?.clientWidth || 1100));
-      const height = Math.max(420, Math.floor(rect?.height || containerRef.current?.clientHeight || 760));
-      setViewportWidth(width);
-      setViewportHeight(height);
+      const container = containerRef.current;
+      const width =
+        container?.clientWidth ||
+        (typeof window !== "undefined" ? window.innerWidth : 1280);
+      const height =
+        container?.clientHeight ||
+        (typeof window !== "undefined" ? window.innerHeight - 56 : 760);
+      setViewportWidth(Math.max(320, width));
+      setViewportHeight(Math.max(240, height));
     };
+
     updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(containerRef.current);
+
+    const container = containerRef.current;
+    let observer: ResizeObserver | null = null;
+    if (container && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updateSize);
+      observer.observe(container);
+    }
+
     window.addEventListener("resize", updateSize);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener("resize", updateSize);
     };
   }, []);
@@ -198,9 +224,11 @@ export default function AnnotationCanvas({
           stageHeight: fallbackHeight,
         };
       }
+      const availableWidth = Math.max(1, viewportWidth - fitPadding * 2);
+      const availableHeight = Math.max(1, viewportHeight - fitPadding * 2);
       const ratio = Math.min(
-        viewportWidth / image.width,
-        viewportHeight / image.height,
+        availableWidth / image.width,
+        availableHeight / image.height,
       );
       const nextCanvasWidth = image.width * ratio;
       const nextCanvasHeight = image.height * ratio;
@@ -208,10 +236,10 @@ export default function AnnotationCanvas({
         canvasWidth: nextCanvasWidth,
         canvasHeight: nextCanvasHeight,
         fitScale: ratio,
-        stageWidth: viewportWidth,
-        stageHeight: viewportHeight,
+        stageWidth: stageToImage ? nextCanvasWidth : viewportWidth,
+        stageHeight: stageToImage ? nextCanvasHeight : viewportHeight,
       };
-    }, [image, viewportHeight, viewportWidth]);
+    }, [fitPadding, image, stageToImage, viewportHeight, viewportWidth]);
 
   const backdrop = useMemo(() => {
     if (!image) {
@@ -415,6 +443,18 @@ export default function AnnotationCanvas({
     applyZoom(nextZoom);
   };
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      setDrawTool: () => setTool("draw"),
+      setPanTool: () => setTool("pan"),
+      zoomIn: () => applyZoom(zoom + 0.2),
+      zoomOut: () => applyZoom(zoom - 0.2),
+      resetView,
+    }),
+    [zoom, resetView],
+  );
+
   // ============================================================
   // ⌨️ HOTKEYS
   // ============================================================
@@ -578,7 +618,7 @@ export default function AnnotationCanvas({
       <div className="relative h-full min-h-0">
         <div
           ref={containerRef}
-          className="h-full min-h-0 overflow-hidden bg-gray-950"
+          className={`h-full min-h-0 w-full overflow-hidden ${stageToImage ? "flex items-center justify-center bg-transparent" : "bg-gray-950"}`}
         >
           <Stage
             ref={stageRef}
@@ -591,7 +631,7 @@ export default function AnnotationCanvas({
             className={tool === "pan" ? "cursor-grab" : "cursor-crosshair"}
           >
             <Layer>
-              {image ? (
+              {image && showBackdrop ? (
                 <KonvaImage
                   image={image}
                   x={backdrop.x}
@@ -605,7 +645,7 @@ export default function AnnotationCanvas({
               <Rect
                 width={stageWidth}
                 height={stageHeight}
-                fill="rgba(0,0,0,0.28)"
+                fill={showBackdrop ? "rgba(0,0,0,0.28)" : "transparent"}
                 listening={false}
               />
               <Group
@@ -706,4 +746,6 @@ export default function AnnotationCanvas({
       {showHotkeys && <HotkeysHelp onClose={() => setShowHotkeys(false)} />}
     </div>
   );
-}
+});
+
+export default AnnotationCanvas;

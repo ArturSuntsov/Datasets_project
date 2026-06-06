@@ -25,13 +25,13 @@ function ProductReadinessChecklist({ items }: { items: ReadinessItem[] }) {
     <div className="card space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Project readiness</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Готовность проекта</h2>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            Minimum setup needed before executors can work without manual support.
+            Минимальная настройка, чтобы исполнители могли работать без ручной поддержки.
           </p>
         </div>
         <div className="rounded bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700 dark:bg-gray-900 dark:text-gray-200">
-          {readyCount}/{items.length} ready
+          {readyCount}/{items.length} готово
         </div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -138,11 +138,11 @@ export default function ProjectDetailPage() {
       }
       setUploadQueue([]);
       setValidationAnnotationFile(null);
-      setUploadError(result?.asset_status === "failed" ? result.error_message || "Video was uploaded, but processing failed." : null);
+      setUploadError(result?.asset_status === "failed" ? result.error_message || "Видео загружено, но обработка завершилась с ошибкой." : null);
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setUploadError(err.response?.data?.detail || err.response?.data?.error || err.message || "Upload failed");
+      setUploadError(err.response?.data?.detail || err.response?.data?.error || err.message || "Загрузка не удалась");
     },
   });
 
@@ -150,7 +150,7 @@ export default function ProjectDetailPage() {
     mutationFn: async () => {
       const importId = activeImportId || String(overviewQuery.data?.imports?.latest_ready_import_id || "");
       if (!projectId || !importId) {
-        throw new Error("Nothing to finalize");
+        throw new Error("Нет импорта для финализации");
       }
       return workflowAPI.finalize(projectId, importId);
     },
@@ -159,7 +159,7 @@ export default function ProjectDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setFinalizeError(err?.response?.data?.detail || err?.response?.data?.error || "Finalize failed");
+      setFinalizeError(err?.response?.data?.detail || err?.response?.data?.error || "Не удалось финализировать импорт");
     },
   });
 
@@ -170,7 +170,7 @@ export default function ProjectDetailPage() {
       setExportPayload(JSON.stringify(payload, null, 2));
     },
     onError: (err: any) => {
-      setArchiveError(err?.response?.data?.detail || err?.message || "Export failed");
+      setArchiveError(err?.response?.data?.detail || err?.message || "Не удалось подготовить экспорт");
     },
   });
 
@@ -189,7 +189,7 @@ export default function ProjectDetailPage() {
       setArchiveError(null);
     },
     onError: (err: any) => {
-      setArchiveError(err?.response?.data?.detail || err?.message || "Archive export failed");
+      setArchiveError(err?.response?.data?.detail || err?.message || "Не удалось экспортировать архив");
     },
   });
 
@@ -237,7 +237,7 @@ export default function ProjectDetailPage() {
         navigate("/projects");
         return;
       }
-      setDeleteError(err?.response?.data?.detail || err?.message || "Failed to delete project");
+      setDeleteError(err?.response?.data?.detail || err?.message || "Не удалось удалить проект");
     },
   });
 
@@ -307,7 +307,7 @@ export default function ProjectDetailPage() {
 
   const createVisualGoldenMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId || !selectedGoldenFrame) throw new Error("Select a frame first");
+      if (!projectId || !selectedGoldenFrame) throw new Error("Сначала выберите кадр");
       const reference = { boxes: goldenBoxes };
       return workflowAPI.createGoldenCandidate(projectId, {
         frame_id: selectedGoldenFrame.frame_id,
@@ -328,7 +328,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
     onError: (err: any) => {
-      setGoldenCreateError(err?.response?.data?.detail || err?.message || "Failed to save golden case.");
+      setGoldenCreateError(err?.response?.data?.detail || err?.message || "Не удалось сохранить golden case.");
     },
   });
 
@@ -469,12 +469,12 @@ export default function ProjectDetailPage() {
   const headerActionClass = "btn-secondary inline-flex min-h-[48px] items-center justify-center whitespace-nowrap";
   const sourceSync = overview?.source_sync;
   const fallbackReadinessGates = [
-    { label: "Import ready", ready: Number(overview?.imports?.ready || 0) > 0 || Number(overview?.imports?.finalized || 0) > 0 },
-    { label: "Intervals assigned", ready: Number(overviewAny?.intervals?.total || 0) > 0 || Number(overviewAny?.intervals?.validation_assigned || 0) > 0 },
-    { label: "Intervals validated", ready: Number(overviewAny?.intervals?.validation_assigned || 0) > 0 || Number(overviewAny?.intervals?.approved || 0) > 0 },
-    { label: "BBox annotation available", ready: Number(overview?.work_items?.total || 0) > 0 },
-    { label: "BBox validation running", ready: Number(overviewAny?.bbox_validation?.assigned || 0) > 0 || Number((overview?.work_items as any)?.validation_pending || 0) > 0 },
-    { label: "Export available", ready: exportReady },
+    { label: "Импорт готов", ready: Number(overview?.imports?.ready || 0) > 0 || Number(overview?.imports?.finalized || 0) > 0 },
+    { label: "Интервалы назначены", ready: Number(overviewAny?.intervals?.total || 0) > 0 || Number(overviewAny?.intervals?.validation_assigned || 0) > 0 },
+    { label: "Интервалы проверены", ready: Number(overviewAny?.intervals?.validation_assigned || 0) > 0 || Number(overviewAny?.intervals?.approved || 0) > 0 },
+    { label: "BBox-разметка доступна", ready: Number(overview?.work_items?.total || 0) > 0 },
+    { label: "BBox-валидация запущена", ready: Number(overviewAny?.bbox_validation?.assigned || 0) > 0 || Number((overview?.work_items as any)?.validation_pending || 0) > 0 },
+    { label: "Экспорт доступен", ready: exportReady },
   ];
   const readinessGates = overview?.readiness_gates?.length ? overview.readiness_gates : fallbackReadinessGates;
   const nextAction = overview?.next_action;
@@ -493,34 +493,34 @@ export default function ProjectDetailPage() {
   const requeueRate = exportTotalItems > 0 ? Math.round((requeuedItems / exportTotalItems) * 100) : 0;
   const projectReadinessItems: ReadinessItem[] = [
     {
-      label: "Label schema",
+      label: "Схема меток",
       ready: !isBBoxProject || (projectQuery.data?.label_schema.length || 0) > 0,
-      detail: `${projectQuery.data?.label_schema.length || 0} labels`,
+      detail: `${projectQuery.data?.label_schema.length || 0} меток`,
     },
     {
-      label: "Instructions",
+      label: "Инструкция",
       ready: Boolean(projectQuery.data?.instructions?.trim() || projectQuery.data?.instructions_file_uri),
-      detail: projectQuery.data?.instructions_file_uri ? "File attached" : "Text instructions",
+      detail: projectQuery.data?.instructions_file_uri ? "Файл прикреплен" : "Текстовая инструкция",
     },
     {
-      label: "Executor pool",
+      label: "Пул исполнителей",
       ready: (projectQuery.data?.allowed_annotator_ids.length || 0) > 0 || projectQuery.data?.participant_rules?.assignment_scope === "all",
-      detail: `${projectQuery.data?.allowed_annotator_ids.length || 0} selected executors`,
+      detail: `${projectQuery.data?.allowed_annotator_ids.length || 0} выбрано`,
     },
     {
-      label: "Imported data",
+      label: "Импортированные данные",
       ready: Number(overview?.imports?.frames_total || 0) > 0 || totalWorkItems > 0 || genericTotal > 0,
-      detail: `${Number(overview?.imports?.frames_total || 0)} frames detected`,
+      detail: `${Number(overview?.imports?.frames_total || 0)} кадров найдено`,
     },
     {
-      label: "Golden controls",
+      label: "Golden-контроль",
       ready: projectQuery.data?.project_type !== "cv" || goldenActiveCount > 0,
-      detail: `${goldenActiveCount} active, ${goldenCandidateCount} candidates`,
+      detail: `${goldenActiveCount} активных, ${goldenCandidateCount} кандидатов`,
     },
     {
-      label: "Workflow settings",
+      label: "Настройки workflow",
       ready: Number(projectQuery.data?.assignments_per_task || 0) > 0 && Number(projectQuery.data?.agreement_threshold || 0) > 0,
-      detail: `${projectQuery.data?.assignments_per_task || 0} answers per item`,
+      detail: `${projectQuery.data?.assignments_per_task || 0} ответов на элемент`,
     },
   ];
 
@@ -592,7 +592,7 @@ export default function ProjectDetailPage() {
             {syncWorkflowMutation.isPending ? "Синхронизируем..." : "Синхронизировать"}
           </button>
           <button className={headerActionClass} onClick={() => pauseProjectMutation.mutate()} disabled={pauseProjectMutation.isPending}>
-            {projectQuery.data.status === "paused" ? "Resume project" : "Pause project"}
+            {projectQuery.data.status === "paused" ? "Возобновить проект" : "Поставить на паузу"}
           </button>
           {canDeleteProject ? (
             <button
@@ -613,7 +613,7 @@ export default function ProjectDetailPage() {
 
       {projectQuery.data.status === "paused" ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
-          Project is paused. Executors cannot receive or submit tasks until it is resumed.
+          Проект на паузе. Исполнители не могут получать и отправлять задания, пока проект не будет возобновлен.
         </div>
       ) : null}
 
@@ -625,7 +625,7 @@ export default function ProjectDetailPage() {
 
       {projectQuery.data.source_project_id ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-          Источник данных: {projectQuery.data.source_project_title || projectQuery.data.source_project_id}. Нажмите Sync workflow, чтобы материализовать задания валидации из source-проекта.
+          Источник данных: {projectQuery.data.source_project_title || projectQuery.data.source_project_id}. Нажмите «Синхронизировать», чтобы создать задания валидации из исходного проекта.
         </div>
       ) : null}
 
@@ -636,11 +636,6 @@ export default function ProjectDetailPage() {
             <h2 className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{taskCopy.projectTitle}</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{taskCopy.projectDescription}</p>
           </div>
-          {taskCopy.annotatorRoute ? (
-            <Link to={taskCopy.annotatorRoute(projectId!)} className="btn-primary">
-              {taskCopy.annotatorTitle}
-            </Link>
-          ) : null}
         </div>
       </div>
 
@@ -654,7 +649,7 @@ export default function ProjectDetailPage() {
               </p>
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Total: {Number(genericTasksQuery.data?.summary?.total || 0)} · Pending: {Number(genericTasksQuery.data?.summary?.pending || 0)} · Validation: {Number(genericTasksQuery.data?.summary?.review || 0)}
+              Всего: {Number(genericTasksQuery.data?.summary?.total || 0)} · Ожидают: {Number(genericTasksQuery.data?.summary?.pending || 0)} · На проверке: {Number(genericTasksQuery.data?.summary?.review || 0)}
             </div>
           </div>
           <textarea
@@ -695,7 +690,7 @@ export default function ProjectDetailPage() {
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{Number(overview?.imports?.frames_total ?? 0)}</div>
         </div>
         <div className="card">
-          <div className="text-sm text-gray-500 dark:text-gray-400">{isGenericTask ? "Задания" : "Work items"}</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">{isGenericTask ? "Задания" : "Рабочие элементы"}</div>
           <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{isGenericTask ? genericTotal : totalWorkItems}</div>
         </div>
         <div className="card">
@@ -718,25 +713,25 @@ export default function ProjectDetailPage() {
       <div className="card space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Quality dashboard</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Панель качества</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Quality is based on consensus, IoU, golden controls, validation batches, and requeue signals.
+              Качество считается по консенсусу, IoU, golden-контролю, пакетам валидации и возвратам на повторную разметку.
             </p>
           </div>
           <Link to={`/projects/${projectId}/golden`} className="btn-secondary">
-            Manage golden
+            Управлять golden
           </Link>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <QualityMetricCard label="Consensus rate" value={`${consensusRate}%`} hint={`${completedWorkItems}/${totalWorkItems} work items completed`} />
-          <QualityMetricCard label="Golden accuracy" value={goldenAccuracy === null ? "No attempts" : `${goldenAccuracy}%`} hint={`${goldenStats.seen} control attempts`} />
-          <QualityMetricCard label="Requeue rate" value={`${requeueRate}%`} hint={`${requeuedItems} items returned to execution`} />
-          <QualityMetricCard label="Validation-ready" value={validationReadyItems} hint={`${bboxValidationAssigned} validation batches assigned`} />
-          <QualityMetricCard label="Exportable" value={`${approvedExportItems}/${exportTotalItems}`} hint={`${exportBlockedItems} blocked or not ready`} />
+          <QualityMetricCard label="Консенсус" value={`${consensusRate}%`} hint={`${completedWorkItems}/${totalWorkItems} рабочих элементов завершено`} />
+          <QualityMetricCard label="Golden-точность" value={goldenAccuracy === null ? "Нет попыток" : `${goldenAccuracy}%`} hint={`${goldenStats.seen} контрольных попыток`} />
+          <QualityMetricCard label="Возврат на доработку" value={`${requeueRate}%`} hint={`${requeuedItems} элементов возвращено исполнителям`} />
+          <QualityMetricCard label="Готово к валидации" value={validationReadyItems} hint={`${bboxValidationAssigned} пакетов валидации назначено`} />
+          <QualityMetricCard label="Готово к экспорту" value={`${approvedExportItems}/${exportTotalItems}`} hint={`${exportBlockedItems} заблокировано или не готово`} />
         </div>
         {(insufficientAnnotatorItems > 0 || insufficientValidatorItems > 0) ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-            Capacity warning: {insufficientAnnotatorItems} items need more executors and {insufficientValidatorItems} items need more validators.
+            Предупреждение по исполнителям: {insufficientAnnotatorItems} элементов требуют больше разметчиков, {insufficientValidatorItems} элементов требуют больше валидаторов.
           </div>
         ) : null}
       </div>
@@ -744,7 +739,7 @@ export default function ProjectDetailPage() {
       <div className="card space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Project results</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Результаты проекта</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
               Каждый проект экспортирует собственный результат. Только проверенный датасет считается финальной выгрузкой для обучения модели.
             </p>
@@ -803,7 +798,7 @@ export default function ProjectDetailPage() {
                     disabled={exportMutation.isPending}
                     onClick={() => previewArtifact(artifact)}
                   >
-              {exportMutation.isPending ? "Preparing..." : `Preview ${effectiveFormat}`}
+              {exportMutation.isPending ? "Готовим..." : `Предпросмотр ${effectiveFormat}`}
                   </button>
                   <button
                     type="button"
@@ -860,28 +855,28 @@ export default function ProjectDetailPage() {
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Golden dataset</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Hidden control examples for checking annotation quality. Open the dedicated workspace to mark frames visually and manage candidates.
+              Скрытые контрольные примеры для проверки качества разметки. Откройте отдельный workspace, чтобы визуально разметить кадры и управлять кандидатами.
             </p>
           </div>
           <Link to={`/projects/${projectId}/golden`} className="btn-primary">
-            Manage golden
+            Управлять golden
           </Link>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Active</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Активные</div>
             <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenActiveCount}</div>
           </div>
           <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Candidates</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Кандидаты</div>
             <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenCandidateCount}</div>
           </div>
           <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Retired</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Удаленные</div>
             <div className="mt-1 font-semibold text-gray-900 dark:text-white">{goldenRetiredCount}</div>
           </div>
           <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Positive / negative</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Хорошие / плохие</div>
             <div className="mt-1 font-semibold text-gray-900 dark:text-white">{activePositiveGolden}/{activeNegativeGolden}</div>
           </div>
         </div>
@@ -1152,30 +1147,30 @@ export default function ProjectDetailPage() {
         <div className="card space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Source project sync</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Синхронизация исходного проекта</h2>
               <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                This validation project materializes tasks from the selected source project. Re-running sync is safe and skips already imported source items.
+                Этот проект валидации создает задания из выбранного исходного проекта. Повторная синхронизация безопасна и пропускает уже импортированные элементы.
               </p>
             </div>
             <button className="btn-primary" type="button" onClick={() => syncWorkflowMutation.mutate()} disabled={syncWorkflowMutation.isPending}>
-              {syncWorkflowMutation.isPending ? "Syncing..." : "Sync source"}
+              {syncWorkflowMutation.isPending ? "Синхронизация..." : "Синхронизировать источник"}
             </button>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Status</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Статус</div>
               <div className="mt-1 font-semibold text-gray-900 dark:text-white">{sourceSync?.status || "not_synced"}</div>
             </div>
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Created</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Создано</div>
               <div className="mt-1 font-semibold text-gray-900 dark:text-white">{sourceSync?.created ?? 0}</div>
             </div>
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Skipped</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Пропущено</div>
               <div className="mt-1 font-semibold text-gray-900 dark:text-white">{sourceSync?.skipped ?? 0}</div>
             </div>
             <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Assigned</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Назначено</div>
               <div className="mt-1 font-semibold text-gray-900 dark:text-white">{taskType === "bbox_validation" ? bboxValidationAssigned : Number(overviewAny?.intervals?.validation_assigned || 0)}</div>
             </div>
           </div>
@@ -1201,7 +1196,7 @@ export default function ProjectDetailPage() {
           />
           {isValidationUpload ? (
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Annotation file for validation</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Файл разметки для валидации</label>
               <input
                 type="file"
                 accept=".json,.csv,application/json,text/csv"
@@ -1209,7 +1204,7 @@ export default function ProjectDetailPage() {
                 className="block w-full text-sm text-gray-600 dark:text-gray-300"
               />
               <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Upload JSON or CSV with file_name/frame_uri and boxes; finalize will create validation tasks from these annotations.
+                Загрузите JSON или CSV с file_name/frame_uri и boxes; после финализации система создаст задания валидации из этой разметки.
               </div>
             </div>
           ) : null}
@@ -1225,38 +1220,38 @@ export default function ProjectDetailPage() {
           ) : null}
           <div className="flex flex-wrap gap-3">
             <button className="btn-primary" type="button" onClick={() => uploadMutation.mutate()} disabled={!canUploadMedia || uploadMutation.isPending || uploadQueue.length === 0 || (isValidationUpload && !validationAnnotationFile && !readyImportId)}>
-              {uploadMutation.isPending ? "Uploading..." : "Upload to preview"}
+              {uploadMutation.isPending ? "Загружаем..." : "Загрузить для предпросмотра"}
             </button>
             <button className="btn-secondary" type="button" onClick={() => finalizeMutation.mutate()} disabled={!canUploadMedia || !readyImportId || finalizeMutation.isPending}>
-              {finalizeMutation.isPending ? "Finalizing..." : "Finalize import"}
+              {finalizeMutation.isPending ? "Финализируем..." : "Финализировать импорт"}
             </button>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
               {hasVideoAssets
-              ? "Для видео первый этап стартует сразу после успешной загрузки: выбранные исполнители получают задачи на интервалы. Finalize import нужен позже для image-only импортов или ручной догенерации bbox-задач по уже утвержденным интервалам."
+              ? "Для видео первый этап стартует сразу после успешной загрузки: выбранные исполнители получают задачи на интервалы. «Финализировать импорт» нужно позже для импортов только изображений или ручной догенерации bbox-задач по уже утвержденным интервалам."
               : taskType === "image_annotation"
-                  ? "For image annotation, run Finalize import after preview to create legacy image tasks."
+                  ? "Для разметки изображений после предпросмотра нажмите «Финализировать импорт», чтобы создать задания."
                   : isValidationUpload
-                    ? "For validation upload, upload media together with the annotation file, preview the parsed annotations, then finalize to create validation tasks."
+                    ? "Для загрузочной валидации загрузите медиа вместе с файлом разметки, проверьте предпросмотр и финализируйте импорт."
                   : canUploadMedia
-                  ? "For images, run Finalize import after preview to create bbox work items for selected annotators."
+                  ? "Для изображений после предпросмотра финализируйте импорт, чтобы создать bbox-задания для выбранных исполнителей."
                   : "Для этого типа проекта импорт медиа не используется."}
           </div>
           {uploadError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{uploadError}</div> : null}
           {finalizeError ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{finalizeError}</div> : null}
           {lastUploadPreview ? (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100">
-              <div>Processed assets: {lastUploadPreview.assets_processed}</div>
-              <div>Failed assets: {lastUploadPreview.assets_failed}</div>
-              <div>Frames detected: {lastUploadPreview.frames_total}</div>
+              <div>Обработано файлов: {lastUploadPreview.assets_processed}</div>
+              <div>Ошибок обработки: {lastUploadPreview.assets_failed}</div>
+              <div>Найдено кадров: {lastUploadPreview.frames_total}</div>
               {lastUploadPreview.cleanup ? (
                 <div className="mt-2">
-                  Cleanup: duplicates removed {lastUploadPreview.cleanup.duplicates_removed ?? 0}, invalid frames removed {lastUploadPreview.cleanup.invalid_frames_removed ?? 0}
+                  Очистка: удалено дублей {lastUploadPreview.cleanup.duplicates_removed ?? 0}, удалено некорректных кадров {lastUploadPreview.cleanup.invalid_frames_removed ?? 0}
                 </div>
               ) : null}
               {lastUploadPreview.validation_annotations ? (
                 <div className="mt-2">
-                  Validation annotations: {lastUploadPreview.validation_annotations.items_total} items, {lastUploadPreview.validation_annotations.boxes_total} boxes, {lastUploadPreview.validation_annotations.intervals_total} intervals
+                  Разметка для валидации: {lastUploadPreview.validation_annotations.items_total} элементов, {lastUploadPreview.validation_annotations.boxes_total} рамок, {lastUploadPreview.validation_annotations.intervals_total} интервалов
                 </div>
               ) : null}
               {lastUploadPreview.ffmpeg ? (
@@ -1264,45 +1259,45 @@ export default function ProjectDetailPage() {
                   ffmpeg: {String(lastUploadPreview.ffmpeg.message || "")}
                 </div>
               ) : null}
-              {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Errors: {lastUploadPreview.errors.join("; ")}</div> : null}
+              {lastUploadPreview.errors.length > 0 ? <div className="mt-2">Ошибки: {lastUploadPreview.errors.join("; ")}</div> : null}
             </div>
           ) : null}
         </div> : null}
 
         <div className="card space-y-4">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Workflow configuration</h2>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Live settings and reporting change by task type.</p>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Конфигурация workflow</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Актуальные настройки и отчетность зависят от типа задачи.</p>
           </div>
           <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
-            <div>Labels: {projectQuery.data.label_schema.map((item) => item.name).join(", ") || "—"}</div>
-            <div>Source sync: {sourceSync?.status || "not_required"}</div>
+            <div>Метки: {projectQuery.data.label_schema.map((item) => item.name).join(", ") || "—"}</div>
+            <div>Синхронизация источника: {sourceSync?.status || "not_required"}</div>
             {sourceSync?.required ? (
               <div>
-                Source items: created {sourceSync.created}, skipped {sourceSync.skipped}
-                {sourceSync.errors.length ? `, errors ${sourceSync.errors.join("; ")}` : ""}
+                Элементы источника: создано {sourceSync.created}, пропущено {sourceSync.skipped}
+                {sourceSync.errors.length ? `, ошибки ${sourceSync.errors.join("; ")}` : ""}
               </div>
             ) : null}
-            {isIntervalProject ? <div>Intervals total: {Number(overviewAny?.intervals?.total || 0)}</div> : <div>Frame interval: {projectQuery.data.frame_interval_sec}s</div>}
-            {isIntervalProject ? <div>Approved intervals: {Number(overviewAny?.intervals?.approved || 0)}</div> : <div>Annotators per task: {projectQuery.data.assignments_per_task}</div>}
-            {isIntervalProject ? <div>Validation assigned: {Number(overviewAny?.intervals?.validation_assigned || 0)}</div> : <div>Agreement threshold: {projectQuery.data.agreement_threshold}</div>}
-            {isIntervalProject ? <div>Validation submitted: {Number(overviewAny?.intervals?.validation_submitted || 0)}</div> : <div>IoU threshold: {projectQuery.data.iou_threshold}</div>}
-            {isIntervalProject ? <div>Agreement: {String(overviewAny?.intervals?.average_validation_agreement ?? 0)}</div> : null}
-            <div>Assignment scope: {String(projectQuery.data.participant_rules?.assignment_scope || "selected_only")}</div>
-            <div>AI pre-labeling: {projectQuery.data.participant_rules?.ai_prelabel_enabled === false ? "disabled" : "enabled"}</div>
-            <div>AI model: {String(projectQuery.data.participant_rules?.ai_model || "baseline-box-v1")}</div>
-            <div>AI confidence: {String(projectQuery.data.participant_rules?.ai_confidence_threshold ?? 0.7)}</div>
-            <div>Keyframe interval: {String(projectQuery.data.participant_rules?.video_keyframe_interval ?? 1)}</div>
-            <div>Tracking setting (baseline): {String(projectQuery.data.participant_rules?.tracking_algorithm || "CSRT")}</div>
-            <div>Task batch size: {String(projectQuery.data.participant_rules?.task_batch_size ?? 10)}</div>
-            <div>Min consecutive frames: {String(projectQuery.data.participant_rules?.min_sequence_size ?? 3)}</div>
-            <div>Annotator pool size: {projectQuery.data.allowed_annotator_ids.length}</div>
-            {isBBoxProject ? <div>Workflow batches created: {String(overview?.work_items?.workflow_batches_total ?? 0)}</div> : null}
-            {isBBoxProject ? <div>Validation-ready frames: {String(overview?.work_items?.validation_ready_items ?? 0)}</div> : null}
+            {isIntervalProject ? <div>Всего интервалов: {Number(overviewAny?.intervals?.total || 0)}</div> : <div>Интервал кадров: {projectQuery.data.frame_interval_sec}с</div>}
+            {isIntervalProject ? <div>Принятые интервалы: {Number(overviewAny?.intervals?.approved || 0)}</div> : <div>Исполнителей на задание: {projectQuery.data.assignments_per_task}</div>}
+            {isIntervalProject ? <div>Назначено на валидацию: {Number(overviewAny?.intervals?.validation_assigned || 0)}</div> : <div>Порог согласия: {projectQuery.data.agreement_threshold}</div>}
+            {isIntervalProject ? <div>Отправлено на валидацию: {Number(overviewAny?.intervals?.validation_submitted || 0)}</div> : <div>Порог IoU: {projectQuery.data.iou_threshold}</div>}
+            {isIntervalProject ? <div>Согласие: {String(overviewAny?.intervals?.average_validation_agreement ?? 0)}</div> : null}
+            <div>Область назначений: {String(projectQuery.data.participant_rules?.assignment_scope || "selected_only")}</div>
+            <div>AI предразметка: {projectQuery.data.participant_rules?.ai_prelabel_enabled === false ? "выключена" : "включена"}</div>
+            <div>AI модель: {String(projectQuery.data.participant_rules?.ai_model || "baseline-box-v1")}</div>
+            <div>AI уверенность: {String(projectQuery.data.participant_rules?.ai_confidence_threshold ?? 0.7)}</div>
+            <div>Интервал ключевых кадров: {String(projectQuery.data.participant_rules?.video_keyframe_interval ?? 1)}</div>
+            <div>Трекинг (baseline): {String(projectQuery.data.participant_rules?.tracking_algorithm || "CSRT")}</div>
+            <div>Размер пакета заданий: {String(projectQuery.data.participant_rules?.task_batch_size ?? 10)}</div>
+            <div>Минимум последовательных кадров: {String(projectQuery.data.participant_rules?.min_sequence_size ?? 3)}</div>
+            <div>Размер пула исполнителей: {projectQuery.data.allowed_annotator_ids.length}</div>
+            {isBBoxProject ? <div>Создано workflow-пакетов: {String(overview?.work_items?.workflow_batches_total ?? 0)}</div> : null}
+            {isBBoxProject ? <div>Кадры готовы к валидации: {String(overview?.work_items?.validation_ready_items ?? 0)}</div> : null}
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
-            <div className="font-medium text-gray-900 dark:text-white">Instructions</div>
-            <div className="mt-2 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{projectQuery.data.instructions || "No instructions added yet."}</div>
+            <div className="font-medium text-gray-900 dark:text-white">Инструкция</div>
+            <div className="mt-2 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{projectQuery.data.instructions || "Инструкция пока не добавлена."}</div>
             {projectQuery.data.instructions_file_uri ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-950">
                 <div className="text-gray-600 dark:text-gray-400">
@@ -1343,18 +1338,18 @@ export default function ProjectDetailPage() {
 
       <div className="card">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Annotator quality snapshot</h2>
-          {overviewQuery.isFetching ? <span className="text-sm text-gray-500">Refreshing…</span> : null}
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Качество исполнителей</h2>
+          {overviewQuery.isFetching ? <span className="text-sm text-gray-500">Обновляем...</span> : null}
         </div>
         <div className="mt-4 overflow-x-auto">
           <table className="table min-w-full text-sm">
             <thead>
               <tr>
-                <th className="py-2 pr-3 text-left">Annotator</th>
-                <th className="py-2 pr-3 text-left">Rating</th>
-                <th className="py-2 pr-3 text-left">Open</th>
-                <th className="py-2 pr-3 text-left">Submitted</th>
-                <th className="py-2 pr-3 text-left">Conflict rate</th>
+                <th className="py-2 pr-3 text-left">Исполнитель</th>
+                <th className="py-2 pr-3 text-left">Рейтинг</th>
+                <th className="py-2 pr-3 text-left">Открыто</th>
+                <th className="py-2 pr-3 text-left">Отправлено</th>
+                <th className="py-2 pr-3 text-left">Конфликты</th>
               </tr>
             </thead>
             <tbody>
@@ -1369,7 +1364,7 @@ export default function ProjectDetailPage() {
               ))}
               {(overview?.annotators ?? []).length === 0 ? (
                 <tr>
-                  <td className="py-4 text-gray-500" colSpan={5}>No annotators assigned yet.</td>
+                  <td className="py-4 text-gray-500" colSpan={5}>Исполнители пока не назначены.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -1379,8 +1374,8 @@ export default function ProjectDetailPage() {
 
       <div className="card">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Security / audit events</h2>
-          {securityEventsQuery.isFetching ? <span className="text-sm text-gray-500">Refreshing…</span> : null}
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Безопасность и аудит</h2>
+          {securityEventsQuery.isFetching ? <span className="text-sm text-gray-500">Обновляем...</span> : null}
         </div>
         <div className="mt-4 space-y-2">
           {(securityEventsQuery.data?.items ?? []).slice(0, 10).map((event) => (
@@ -1389,19 +1384,19 @@ export default function ProjectDetailPage() {
                 <span className="font-medium text-gray-900 dark:text-white">{event.event_type}</span>
                 <span className="text-gray-500">{new Date(event.created_at).toLocaleString()}</span>
               </div>
-              <div className="mt-1 text-gray-500 dark:text-gray-400">severity: {event.severity}</div>
+              <div className="mt-1 text-gray-500 dark:text-gray-400">важность: {event.severity}</div>
               <pre className="mt-2 max-h-24 overflow-auto rounded bg-gray-950 p-2 text-[11px] text-green-200">{JSON.stringify(event.payload, null, 2)}</pre>
             </div>
           ))}
           {(securityEventsQuery.data?.items ?? []).length === 0 ? (
-            <div className="text-sm text-gray-500 dark:text-gray-400">No events yet.</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">Событий пока нет.</div>
           ) : null}
         </div>
       </div>
 
       {exportPayload ? (
         <div className="card">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Export preview</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Предпросмотр экспорта</h2>
           <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg bg-gray-950 p-4 text-xs text-green-200">{exportPayload}</pre>
         </div>
       ) : null}

@@ -11,14 +11,14 @@ type NavItem = {
 };
 
 const items: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: "D", roles: ["customer", "annotator", "admin"] },
-  { to: "/projects", label: "Projects", icon: "P", roles: ["customer", "admin"] },
-  { to: "/datasets", label: "Datasets", icon: "DS", roles: ["customer", "annotator", "admin"] },
-  { to: "/tasks", label: "Tasks", icon: "T", roles: ["customer", "annotator", "admin"] },
-  { to: "/labeling", label: "Labeling", icon: "L", roles: ["annotator", "admin"] },
-  { to: "/quality", label: "Quality", icon: "Q", roles: ["customer", "admin"] },
-  { to: "/finance", label: "Finance", icon: "F", roles: ["customer", "annotator", "admin"] },
-  { to: "/profile", label: "Profile", icon: "U", roles: ["customer", "annotator", "admin"] },
+  { to: "/", label: "Дашборд", icon: "D", roles: ["customer", "annotator", "admin"] },
+  { to: "/projects", label: "Проекты", icon: "P", roles: ["customer", "admin"] },
+  { to: "/datasets", label: "Датасеты", icon: "DS", roles: ["customer", "annotator", "admin"] },
+  { to: "/tasks", label: "Задачи", icon: "T", roles: ["annotator", "admin"] },
+  { to: "/labeling", label: "Разметка", icon: "L", roles: ["annotator", "admin"] },
+  { to: "/quality", label: "Качество", icon: "Q", roles: ["customer", "admin"] },
+  { to: "/finance", label: "Финансы", icon: "F", roles: ["customer", "annotator", "admin"] },
+  { to: "/profile", label: "Профиль", icon: "U", roles: ["customer", "annotator", "admin"] },
 ];
 
 export function Sidebar() {
@@ -72,7 +72,7 @@ export function Sidebar() {
             </div>
           </div>
         ) : (
-          <p className="text-center text-xs text-gray-500 dark:text-gray-400">Not signed in</p>
+          <p className="text-center text-xs text-gray-500 dark:text-gray-400">Вход не выполнен</p>
         )}
       </div>
     </aside>

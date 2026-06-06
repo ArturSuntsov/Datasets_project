@@ -275,6 +275,9 @@ export interface ProjectParticipantRules {
   bbox_real_items_per_batch?: number;
   bbox_golden_items_per_batch?: number;
   golden_min_score?: number;
+  golden_pass_threshold?: number;
+  golden_sample_ratio?: number;
+  annotation_golden_ratio?: number;
   golden_candidate_threshold?: number;
   golden_promotion_target?: number;
   annotation_golden_interval?: number;
@@ -659,8 +662,13 @@ export interface AnnotatorProjectSummary {
   widget_type?: ProjectWidgetType | string;
   stage_title?: string;
   linked_project_title?: string;
-  route?: string;
-  project_status: string;
+    route?: string;
+    access_state?: {
+      status?: "instruction_required" | "qualification_required" | "qualified" | "warning" | "retraining_required" | "blocked" | string;
+      reason?: string;
+      [key: string]: unknown;
+    };
+    project_status: string;
   instructions: string;
   instructions_file_uri?: string;
   instructions_file_name?: string;
@@ -727,6 +735,15 @@ export interface AnnotatorProjectDetail {
   workflow?: {
     workflow_batches_total?: number;
     validation_ready_items?: number;
+    [key: string]: unknown;
+  };
+  access_state?: {
+    status?: "instruction_required" | "qualification_required" | "qualified" | "warning" | "retraining_required" | "blocked" | string;
+    reason?: string;
+    qualification_score?: number;
+    qualification_passed_count?: number;
+    qualification_target_count?: number;
+    instructions_version?: number;
     [key: string]: unknown;
   };
   next_assignment_id?: string | null;
@@ -817,6 +834,9 @@ export interface AssignmentSubmitResponse {
   annotation_id: string;
   assignment_status: string;
   annotation_status: string;
+  golden_passed?: boolean | null;
+  access_status?: string | null;
+  rejected_real_assignments?: number;
   evaluation?: {
     state: "accepted" | "requeued" | "golden_checked" | string;
     metrics: Record<string, unknown>;

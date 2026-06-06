@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useAuthStore } from "./store";
 import { Layout } from "./components/Layout";
 
@@ -31,6 +31,23 @@ const ProjectGoldenPage = React.lazy(() => import("./pages/ProjectGoldenPage"));
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+function RequireProjectManager({ children }: { children: React.ReactElement }) {
+  const user = useAuthStore((s) => s.user);
+  const { projectId } = useParams<{ projectId: string }>();
+  if (user && user.role !== "customer" && user.role !== "admin") {
+    return <Navigate to={`/projects/${projectId}`} replace />;
+  }
+  return children;
+}
+
+function RequireTasksAccess({ children }: { children: React.ReactElement }) {
+  const user = useAuthStore((s) => s.user);
+  if (user?.role === "customer") {
+    return <Navigate to="/projects" replace />;
+  }
+  return children;
 }
 
 function LazyPage({ children }: { children: React.ReactElement }) {
@@ -92,9 +109,11 @@ export default function App() {
         element={
           <RequireAuth>
             <Layout>
-              <LazyPage>
-                <ProjectGoldenPage />
-              </LazyPage>
+              <RequireProjectManager>
+                <LazyPage>
+                  <ProjectGoldenPage />
+                </LazyPage>
+              </RequireProjectManager>
             </Layout>
           </RequireAuth>
         }
@@ -209,7 +228,9 @@ export default function App() {
         element={
           <RequireAuth>
             <Layout>
-              <TasksPage />
+              <RequireTasksAccess>
+                <TasksPage />
+              </RequireTasksAccess>
             </Layout>
           </RequireAuth>
         }
